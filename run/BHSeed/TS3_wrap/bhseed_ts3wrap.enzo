@@ -1,0 +1,63 @@
+#
+# TS3_wrap — periodic boundary wrap test for BH seeding
+# Box = 100 kpc (non-comoving), 50^3 grid, 2 qualifying cells
+#
+
+ProblemType                = 90
+TopGridRank                = 3
+TopGridDimensions          = 50 50 50
+
+DomainLeftEdge             = 0.0 0.0 0.0
+DomainRightEdge            = 1.0 1.0 1.0
+
+# ---- Units (non-comoving) ----
+# LengthUnits = 100 kpc = 3.0857e23 cm
+# This sets BoxKpcH = LengthUnits / kpc_cm = 100.0
+# ComovingBoxSize is NOT used when ComovingCoordinates = 0
+ComovingCoordinates        = 0
+LengthUnits                = 3.0857e23
+DensityUnits               = 1.67e-24
+TimeUnits                  = 3.1557e13
+
+# ---- Hydro ----
+HydroMethod                = 0
+DualEnergyFormalism        = 1
+FluxCorrection             = 0
+CourierSafetyNumber        = 0.3
+InterpolationMethod        = 1
+
+# ---- BH Seeding ----
+BHSeedingMethod            = 1
+BHSeedOverdensityThreshold = 5.0
+BHSeedMetallicityThreshold = 1e-4
+BHSeedTemperatureThreshold = 1e4
+BHSeedExclusionRadius      = 30.0
+BHSeedMass                 = 1.0
+BHSeedVelDivCrit           = 0
+BHSeedThermalCrit          = 0
+BHSeedSelfBoundCrit        = 0
+BHSeedRunEveryTimestep     = 1
+
+# ---- Star formation OFF ----
+StarParticleCreation       = 0
+StarParticleFeedback       = 0
+
+# ---- Timing ----
+InitialTime                = 0.0
+StopTime                   = 0.02
+dtDataDump                 = 0.01
+CycleSkipDataDump          = 0
+
+# ---- Gravity OFF ----
+SelfGravity                = 0
+UnigridTranspose           = 0
+
+# ---- IO ----
+ParallelRootGridIO         = 0
+OutputTemperature          = 1
+
+# ---- TestStarParticle problem defaults ----
+TestStarParticleDensity    = 1.0
+TestStarParticleEnergy     = 1.0
+TestStarParticleVelocity   = 0.0 0.0 0.0
+MetallicityField_Fraction  = 0.002

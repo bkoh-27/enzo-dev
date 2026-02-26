@@ -1072,6 +1072,17 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "MBHFeedbackMetalYield                 = %"GSYM"\n", MBHFeedbackMetalYield);
   fprintf(fptr, "MBHFeedbackThermalRadius              = %"GSYM"\n", MBHFeedbackThermalRadius);
   fprintf(fptr, "MBHFeedbackJetsThresholdMass          = %"GSYM"\n\n", MBHFeedbackJetsThresholdMass);
+  fprintf(fptr, "BHSeedingMethod             = %"ISYM"\n", BHSeedingMethod);
+  fprintf(fptr, "BHSeedOverdensityThreshold  = %"GOUTSYM"\n", BHSeedOverdensityThreshold);
+  fprintf(fptr, "BHSeedMetallicityThreshold  = %"GOUTSYM"\n", BHSeedMetallicityThreshold);
+  fprintf(fptr, "BHSeedMass                  = %"GOUTSYM"\n", BHSeedMass);
+  fprintf(fptr, "BHSeedTemperatureThreshold  = %"GOUTSYM"\n", BHSeedTemperatureThreshold);
+  fprintf(fptr, "BHSeedExclusionRadius       = %"GOUTSYM"  # physical kpc\n",
+          BHSeedExclusionRadius);
+  fprintf(fptr, "BHSeedVelDivCrit            = %"ISYM"\n", BHSeedVelDivCrit);
+  fprintf(fptr, "BHSeedThermalCrit           = %"ISYM"\n", BHSeedThermalCrit);
+  fprintf(fptr, "BHSeedSelfBoundCrit         = %"ISYM"\n", BHSeedSelfBoundCrit);
+  fprintf(fptr, "BHSeedRunEveryTimestep      = %"ISYM"\n\n", BHSeedRunEveryTimestep);
 
   fprintf(fptr, "MBHParticleIO                         = %"ISYM"\n",
 	  MBHParticleIO);

@@ -651,7 +651,9 @@ OBJS_CONFIG_LIB = \
         Grid_SphericalInfallGetProfile.o \
         Grid_SphericalInfallInitializeGrid.o \
         Grid_StarParticleHandler.o \
-	Grid_StratifiedMediumExplosionInitialize.o \
+        Grid_BHSeedHandler.o \
+        Grid_MBHMaker2Handler.o \
+		Grid_StratifiedMediumExplosionInitialize.o \
         Grid_SupernovaRestartInitialize.o \
         Grid_SubtractAccretedMassFromSphere.o \
         Grid_TestGravityCheckResults.o \
@@ -932,7 +934,9 @@ OBJS_CONFIG_LIB = \
 	star_feedback_pn_snia.o \
         star_maker1.o \
         star_maker2.o \
-	star_maker3mom.o \
+        star_maker_bh_seed.o \
+        mbh_maker2.o \
+		star_maker3mom.o \
         star_maker3.o \
         star_maker4.o \
 	star_maker5.o \

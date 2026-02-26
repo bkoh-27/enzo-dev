@@ -202,6 +202,10 @@ int ClusterSMBHSumGasMass(HierarchyEntry *Grids[], int NumberOfGrids, int level)
 int CreateSiblingList(HierarchyEntry ** Grids, int NumberOfGrids, SiblingGridList *SiblingList, 
 		      int StaticLevelZero,TopGridData * MetaData,int level);
 
+int BHSeedBeginLevel(HierarchyEntry *Grids[], int NumberOfGrids, int level, FLOAT time,
+                     LevelHierarchyEntry *LevelArray[]);
+int BHSeedFinalizeLevel();
+
 #ifdef FAST_SIB 
 int CreateSUBlingList(TopGridData *MetaData,
 		      LevelHierarchyEntry *LevelArray[], int level,
@@ -665,6 +669,12 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
         }//grid
     }//RK hydro
     
+      if (BHSeedingMethod && NumberOfGrids > 0)
+	if (BHSeedBeginLevel(Grids, NumberOfGrids, level,
+			     Grids[0]->GridData->ReturnTime(),
+			     LevelArray) == FAIL)
+	  ENZO_FAIL("Error in BHSeedBeginLevel.");
+
       /* Solve the cooling and species rate equations. */
  
     for (grid1 = 0; grid1 < NumberOfGrids; grid1++) {
@@ -691,6 +701,11 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
       }*/
 #endif
 
+
+      if (BHSeedingMethod)
+	if (Grids[grid1]->GridData->MBHMaker2Handler
+	    (Grids[grid1]->NextGridNextLevel, level, dtLevelAbove) == FAIL)
+	  ENZO_FAIL("Error in MBHMaker2Handler.");
 
       /* Include 'star' particle creation and feedback. */
 
@@ -760,6 +775,10 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
       if (UseMagneticSupernovaFeedback)
 	Grids[grid1]->GridData->MagneticSupernovaList.clear(); 
     } //end loop over grids
+
+    if (BHSeedingMethod)
+      if (BHSeedFinalizeLevel() == FAIL)
+	ENZO_FAIL("Error in BHSeedFinalizeLevel.");
 
     /* Finalize (accretion, feedback etc) for Active particles. */
     ActiveParticleFinalize(Grids, MetaData, NumberOfGrids, LevelArray,

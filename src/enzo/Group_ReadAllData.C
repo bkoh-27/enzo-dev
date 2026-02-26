@@ -176,7 +176,7 @@ int Group_ReadAllData(char *name, HierarchyEntry *TopGrid, TopGridData &MetaData
 
   if (NumberOfParticleAttributes == INT_UNDEFINED ||
       NumberOfParticleAttributes == 0) {
-    if (StarParticleCreation || StarParticleFeedback) {
+    if (StarParticleCreation || StarParticleFeedback || BHSeedingMethod) {
       NumberOfParticleAttributes = 3;
       if (StarMakerTypeIaSNe) NumberOfParticleAttributes++;
       AddParticleAttributes = TRUE;

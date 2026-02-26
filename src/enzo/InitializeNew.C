@@ -271,7 +271,7 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
  
   // Declarations
  
-  FILE *fptr, *BCfptr, *Outfptr;
+  FILE *fptr, *BCfptr;
   int dim, i;
  
   // Open parameter file
@@ -314,7 +314,7 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
  
   if (NumberOfParticleAttributes == INT_UNDEFINED ||
       NumberOfParticleAttributes == 0) {
-    if (StarParticleCreation || StarParticleFeedback) {
+    if (StarParticleCreation || StarParticleFeedback || BHSeedingMethod) {
       NumberOfParticleAttributes = 3;
       if (StarMakerTypeIaSNe) NumberOfParticleAttributes++;
       if (StarMakerTypeIISNeMetalField) NumberOfParticleAttributes++;
@@ -1069,8 +1069,10 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
   
   fclose(fptr);
   
-  if (MyProcessorNumber == ROOT_PROCESSOR)
+  if (MyProcessorNumber == ROOT_PROCESSOR) {
     fclose(Outfptr);
+    Outfptr = NULL;
+  }
 
   PrintMemoryUsage("Exit X_Init");
 

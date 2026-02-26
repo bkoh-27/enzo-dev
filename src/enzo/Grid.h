@@ -234,6 +234,15 @@ class grid
   friend class ActiveParticleType_Skeleton;
   friend class ActiveParticleType_SmartStar;
   friend class ActiveParticleType_SpringelHernquist;
+  friend int mbh_maker2(grid *ThisGrid,
+                        int level,
+                        int DensNum, int Vel1Num, int Vel2Num, int Vel3Num,
+                        float *temperature, float *cooling_time, float *dmfield,
+                        float *metal_fraction, int metal_field_present,
+                        float CellWidthTemp,
+                        float DensityUnits, float LengthUnits, float TimeUnits,
+                        int MaximumRefinementLevel);
+  friend int BHSeedCreateLocalBestParticle();
 
 #ifdef NEW_PROBLEM_TYPES
   friend class EnzoProblemType;
@@ -2611,7 +2620,10 @@ int zEulerSweep(int j, int NumberOfSubgrids, fluxes *SubgridFluxes[],
 
   int ComovingGravitySourceTerm();
 
-/* Star Particle handler routine. */
+  /* Star Particle handler routine. */
+
+  int MBHMaker2Handler(HierarchyEntry* SubgridPointer, int level,
+                       float dtLevelAbove);
 
   int StarParticleHandler(HierarchyEntry* SubgridPointer, int level,
 			  float dtLevelAbove, float TopGridTimeStep);
@@ -2855,6 +2867,7 @@ int zEulerSweep(int j, int NumberOfSubgrids, fluxes *SubgridFluxes[],
 
 // For once-per-rootgrid-timestep star formation.
   void SetMakeStars(void) { MakeStars = 1; };
+  int ReturnMakeStars(void) { return MakeStars; };
 
   /* Calculate enclosed mass within a radius */
 
@@ -3360,4 +3373,3 @@ int zEulerSweep(int j, int NumberOfSubgrids, fluxes *SubgridFluxes[],
 
 
 #endif
-

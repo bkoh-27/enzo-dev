@@ -744,6 +744,18 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   MBHInsertLocationFilename        = (char*) "mbh_insert_location.in";
   OutputWhenJetsHaveNotEjected     = FALSE;
 
+  BHSeedingMethod                  = 0;
+  BHSeedOverdensityThreshold       = 100.0;
+  BHSeedMetallicityThreshold       = 1.0e-4;
+  BHSeedMetallicityThresholdInSolar = FLOAT_UNDEFINED;
+  BHSeedMass                       = 1.0e5;
+  BHSeedTemperatureThreshold       = 1.0e4;
+  BHSeedExclusionRadius            = 100.0;
+  BHSeedVelDivCrit                 = TRUE;
+  BHSeedThermalCrit                = FALSE;
+  BHSeedSelfBoundCrit              = FALSE;
+  BHSeedRunEveryTimestep           = TRUE;
+
   H2StarMakerEfficiency = 0.01;
   H2StarMakerNumberDensityThreshold = 0.0;
   H2StarMakerMinimumMass = 0.0;

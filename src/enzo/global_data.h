@@ -818,6 +818,7 @@ EXTERN float flagging_pct;
 EXTERN float moving_pct;
 #endif /* MPI_INSTRUMENTATION */
 EXTERN char name[MAX_NAME_LENGTH];
+EXTERN FILE *Outfptr;
 EXTERN FILE *tracePtr;
 EXTERN int traceMPI;
 #ifdef MEM_TRACE
@@ -1112,6 +1113,19 @@ EXTERN char *MBHParticleIOFilename;
 EXTERN double MBHParticleIOTemp[30][5+MAX_DIMENSION];
 EXTERN char *MBHInsertLocationFilename;
 EXTERN int OutputWhenJetsHaveNotEjected;
+
+/* BH seeding (star_maker_bh_seed) */
+EXTERN int   BHSeedingMethod;                    // 0=off, 1=on
+EXTERN float BHSeedOverdensityThreshold;         // code-unit density threshold
+EXTERN float BHSeedMetallicityThreshold;         // absolute metal mass fraction
+EXTERN float BHSeedMetallicityThresholdInSolar;  // threshold in Zsun (converted to absolute)
+EXTERN float BHSeedMass;                         // Msun
+EXTERN float BHSeedTemperatureThreshold;         // K
+EXTERN float BHSeedExclusionRadius;              // physical kpc (default 100)
+EXTERN int   BHSeedVelDivCrit;                   // require converging flow
+EXTERN int   BHSeedThermalCrit;                  // require tcool < tdyn
+EXTERN int   BHSeedSelfBoundCrit;                // require alpha < 1
+EXTERN int   BHSeedRunEveryTimestep;             // run every sub-cycle timestep
 
 /* Star Class Radiation Particle IO (PARTICLE_TYPE_RAD) */
 EXTERN char *RadiationSourcesFileName;

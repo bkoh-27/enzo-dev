@@ -1093,6 +1093,24 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     if (sscanf(line, "MBHInsertLocationFilename = %s", dummy) == 1)
       MBHInsertLocationFilename = dummy;
 
+    ret += sscanf(line, "BHSeedingMethod = %"ISYM, &BHSeedingMethod);
+    ret += sscanf(line, "BHSeedOverdensityThreshold = %"FSYM,
+		  &BHSeedOverdensityThreshold);
+    ret += sscanf(line, "BHSeedMetallicityThreshold = %"FSYM,
+		  &BHSeedMetallicityThreshold);
+    ret += sscanf(line, "BHSeedMetallicityThresholdInSolar = %"FSYM,
+		  &BHSeedMetallicityThresholdInSolar);
+    ret += sscanf(line, "BHSeedMass = %"FSYM, &BHSeedMass);
+    ret += sscanf(line, "BHSeedTemperatureThreshold = %"FSYM,
+		  &BHSeedTemperatureThreshold);
+    ret += sscanf(line, "BHSeedExclusionRadius = %"FSYM,
+		  &BHSeedExclusionRadius);
+    ret += sscanf(line, "BHSeedVelDivCrit = %"ISYM, &BHSeedVelDivCrit);
+    ret += sscanf(line, "BHSeedThermalCrit = %"ISYM, &BHSeedThermalCrit);
+    ret += sscanf(line, "BHSeedSelfBoundCrit = %"ISYM, &BHSeedSelfBoundCrit);
+    ret += sscanf(line, "BHSeedRunEveryTimestep = %"ISYM,
+		  &BHSeedRunEveryTimestep);
+
     ret += sscanf(line, "H2StarMakerEfficiency = %"FSYM,
 		  &H2StarMakerEfficiency);
     ret += sscanf(line, "H2StarMakerNumberDensityThreshold = %"FSYM,
@@ -2133,6 +2151,34 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     printf("Exiting.\n");
     my_exit(EXIT_SUCCESS);
 #endif
+  }
+
+  if (BHSeedMetallicityThresholdInSolar != FLOAT_UNDEFINED) {
+    const float BH_SEED_Z_SUN = 0.02f;
+    BHSeedMetallicityThreshold =
+      BHSeedMetallicityThresholdInSolar * BH_SEED_Z_SUN;
+  }
+
+  if (BHSeedingMethod) {
+    if (BHSeedMass <= 0.0f)
+      ENZO_FAIL("BHSeedMass must be positive.");
+    if (BHSeedExclusionRadius < 0.0f)
+      ENZO_FAIL("BHSeedExclusionRadius must be non-negative (units: physical kpc).");
+    if (BHSeedOverdensityThreshold <= 0.0f)
+      ENZO_FAIL("BHSeedOverdensityThreshold must be positive.");
+  }
+
+  if (MyProcessorNumber == ROOT_PROCESSOR && BHSeedingMethod) {
+    fprintf(stderr, "BHSeed: ExclusionRadius = %.1f physical kpc "
+            "(will be converted to comoving kpc/h at runtime using a(t) and h)\n",
+            BHSeedExclusionRadius);
+  }
+
+  if (BHSeedingMethod && ComovingCoordinates) {
+    if (BHSeedMass > 1e8f)
+      fprintf(stderr, "WARNING BHSeedMass=%.3g Msun is very large; "
+              "cells at BHSeedOverdensityThreshold may not have enough gas. "
+              "Monitor ngates_mass in [BHSEED] log.\n", BHSeedMass);
   }
 
   /* Cosmic ray diffusion should be off if Cosmic rays are off */

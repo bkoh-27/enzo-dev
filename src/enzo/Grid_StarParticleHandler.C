@@ -105,14 +105,14 @@ extern "C" void FORTRAN_NAME(star_maker2)(int *nx, int *ny, int *nz,
                int *nmax, FLOAT *xstart, FLOAT *ystart, FLOAT *zstart,
      		      int *ibuff,
                int *imetal, hydro_method *imethod, int *tindsf, float *mintdyn,
-	            int *veldivcrit, int *selfboundcrit,
+		           int *veldivcrit, int *selfboundcrit,
                int *thermalcrit, int* usejeans, int *h2crit, 
                float *odthresh, float *masseff, float *smthresh, float *tempthresh, 
                int *level,
-		         int *np, 
+			         int *np, 
                FLOAT *xp, FLOAT *yp, FLOAT *zp, float *up, float *vp, float *wp,
-		         float *mp, float *tdp, float *tcp, float *metalf,
-	            int *imetalSNIa, float *metalSNIa, float *metalfSNIa);
+               float *mp, float *tdp, float *tcp, float *metalf,
+		           int *imetalSNIa, float *metalSNIa, float *metalfSNIa);
  
 extern "C" void FORTRAN_NAME(star_maker3mom)(int *nx, int *ny, int *nz,
              float *d, float *dm, float *temp, float *u, float *v, float *w,
@@ -1484,7 +1484,7 @@ int grid::StarParticleHandler(HierarchyEntry* SubgridPointer, int level,
     delete tg; // temporary grid
 
     //    if (debug) printf("StarParticle: end\n");
- 
+
   }
 #ifdef EMISSIVITY
     if (StarMakerEmissivityField > 0) {
