@@ -97,6 +97,10 @@ Star::Star(grid *_grid, int _id, int _level)
   else
     LifeTime = _grid->ParticleAttribute[1][_id];
   Metallicity = _grid->ParticleAttribute[2][_id];
+  /* ParticleAttribute convention for star/BH particles:
+     [0]=BirthTime, [1]=LifeTime, [2]=Metallicity, [3]=MBH last_accretion_rate. */
+  if (type == PARTICLE_TYPE_MBH && NumberOfParticleAttributes > 3)
+    last_accretion_rate = _grid->ParticleAttribute[3][_id];
   this->ConvertAllMassesToSolar();
 }
 
@@ -201,7 +205,7 @@ Star::~Star(void)
 
  ***************/
 
-void Star::operator=(Star a)
+void Star::operator=(const Star &a)
 {
   int i, dim;
   //NextStar = a.NextStar;
@@ -445,6 +449,9 @@ void Star::CopyFromParticle(grid *_grid, int _id, int _level)
   BirthTime = _grid->ParticleAttribute[0][_id];
   LifeTime = _grid->ParticleAttribute[1][_id];
   Metallicity = _grid->ParticleAttribute[2][_id];
+  if (type == PARTICLE_TYPE_MBH)
+    last_accretion_rate = (NumberOfParticleAttributes > 3) ?
+      _grid->ParticleAttribute[3][_id] : 0.0;
   // below is removed because we want to keep Star->Mass as double 
   // during the run - Ji-hoon Kim, Dec.2009
   //
@@ -605,4 +612,3 @@ void Star::StarToBuffer(StarBuffer *result)
   result->AddedEmissivity = tmp->AddedEmissivity;
   return;
 }
-

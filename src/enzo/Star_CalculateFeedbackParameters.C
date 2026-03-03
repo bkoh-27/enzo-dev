@@ -176,7 +176,7 @@ void Star::CalculateFeedbackParameters(float &Radius,
       ENZO_FAIL("Applying MBH_THERMAL feedback to non-MBH particle!");
 
     /* find mdot */
-    mdot = isnan(this->last_accretion_rate) ? 0.0 : this->last_accretion_rate;  
+    mdot = isnan(this->last_accretion_rate) ? 0.0 : this->last_accretion_rate;
     
     /* Inject energy into a sphere */
     Radius = MBHFeedbackThermalRadius * pc_cm / LengthUnits;
@@ -255,7 +255,3 @@ void Star::CalculateFeedbackParameters(float &Radius,
 
   return;
 }
-
-
-
-

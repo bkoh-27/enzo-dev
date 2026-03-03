@@ -116,6 +116,16 @@ int StarParticleAddFeedback(TopGridData *MetaData,
        TemperatureUnits, TimeUnits, VelocityUnits, dtForThisStar, 
        Time, SphereCheck);
 
+    if (debug && cstar->ReturnFeedbackFlag() == MBH_THERMAL) {
+      double lar_code = cstar->ReturnLastAccretionRate();
+      double mdot_code = isnan(lar_code) ? 0.0 : lar_code;
+      fprintf(stdout, "[MBHFB] cycle=%d BH=%"ISYM" mdot=%.3e Msun/yr "
+              "lar=%.3e Radius_pc=%.1f E=%.3e\n",
+              MetaData->CycleNumber, cstar->ReturnID(),
+              mdot_code * yr_s, lar_code * yr_s,
+              influenceRadius * LengthUnits / pc_cm, EjectaThermalEnergy);
+    }
+
     if (SphereCheck) {
 
     /* Recalibrate MBHFeedbackThermalRadius if requested */

@@ -515,6 +515,9 @@ int Star::CalculateMassAccretion(float &BondiRadius, float &density)
     if (density < tiny_number || temperature[index] < 10 || isnan(mdot)) 
       mdot = 0.0;
 
+    // R2/D1: persist finalized mdot directly for MBH feedback in the next step.
+    this->last_accretion_rate = mdot;
+
     //this->DeltaMass += mdot * (CurrentGrid->dtFixed * TimeUnits);
     
     this->naccretions = 1;

@@ -76,6 +76,9 @@ void Star::MirrorToParticle(void)
   CurrentGrid->ParticleAttribute[0][place] = this->BirthTime;
   CurrentGrid->ParticleAttribute[1][place] = this->LifeTime;
   CurrentGrid->ParticleAttribute[2][place] = this->Metallicity;
+  // See StarRoutines.C for full attribute convention; attr[3] stores MBH lar.
+  if (this->type == MBH && NumberOfParticleAttributes > 3)
+    CurrentGrid->ParticleAttribute[3][place] = this->last_accretion_rate;
   
   return;
 }

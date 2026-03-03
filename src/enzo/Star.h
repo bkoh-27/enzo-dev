@@ -63,7 +63,7 @@ public:
   ~Star();
 
   // Operators
-  void operator=(Star a);
+  void operator=(const Star &a);
   Star operator+(Star a);
   Star operator+=(Star a);
   Star* copy(void);

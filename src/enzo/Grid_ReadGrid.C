@@ -51,6 +51,7 @@ static Eint32 sd_id, sds_index; // HDF4 (SD) handlers
 int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[], 
 		   int ReadText, int ReadData)
 {
+  static int warned_missing_particle_attribute = FALSE;
   bool TryHDF5 = TRUE; 
   int i, j, k, dim, field, size, active_size;
   char name[MAX_LINE_LENGTH], dummy[MAX_LINE_LENGTH];
@@ -770,8 +771,20 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
 #else
 	  if (ReadField(ParticleAttribute[j], &NumberOfParticles, 1, name,
 			ParticleAttributeLabel[j]) == FAIL) {
-	    fprintf(stderr, "Error reading ParticleAttribute %d\n", j);
-	    return FAIL;
+	    if (j >= 3) {
+	      for (i = 0; i < NumberOfParticles; i++)
+		ParticleAttribute[j][i] = 0;
+	      if (!warned_missing_particle_attribute &&
+		  MyProcessorNumber == ROOT_PROCESSOR) {
+		fprintf(stderr, "INFO [MBHFB]: missing particle attribute '%s' "
+			"in %s; zero-initializing this slot.\n",
+			ParticleAttributeLabel[j], name);
+		warned_missing_particle_attribute = TRUE;
+	      }
+	    } else {
+	      fprintf(stderr, "Error reading ParticleAttribute %d\n", j);
+	      return FAIL;
+	    }
 	  }
 #endif
 	}
@@ -991,31 +1004,50 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
 	  }
 	} else {
 	  for (j = 0; j < NumberOfParticleAttributes; j++) {
-	    
-	    file_dsp_id = H5Screate_simple((Eint32) 1, TempIntArray, NULL);
-	    if (io_log) fprintf(log_fptr, "H5Screate file_dsp_id: %"ISYM"\n", file_dsp_id);
-	    if( file_dsp_id == h5_error ){ENZO_FAIL("line 863  Grid_ReadGrid \n");}
-	    
-	    if (io_log) fprintf(log_fptr,"H5Dopen with Name = %s\n",ParticleAttributeLabel[j]);
-	    
-	    dset_id =  H5Dopen(file_id, ParticleAttributeLabel[j]);
-	    if (io_log) fprintf(log_fptr, "H5Dopen id: %"ISYM"\n", dset_id);
-	    if( dset_id == h5_error ){ENZO_FAIL("line 869  Grid_ReadGrid \n");}
-	    
-	    h5_status = H5Dread(dset_id, float_type_id, H5S_ALL, H5S_ALL, H5P_DEFAULT, (VOIDP) temp);
-	    if (io_log) fprintf(log_fptr, "H5Dread: %"ISYM"\n", h5_status);
-	    if( h5_status == h5_error ){ENZO_FAIL("line 873  Grid_ReadGrid \n");}
-	    
-	    h5_status = H5Sclose(file_dsp_id);
-	    if (io_log) fprintf(log_fptr, "H5Sclose: %"ISYM"\n", h5_status);
-	    if( h5_status == h5_error ){ENZO_FAIL("line 877  Grid_ReadGrid \n");}
-	    
-	    h5_status = H5Dclose(dset_id);
-	    if (io_log) fprintf(log_fptr, "H5Dclose: %"ISYM"\n", h5_status);
-	    if( h5_status == h5_error ){ENZO_FAIL("line 881  Grid_ReadGrid \n");}
-	    
-	    for (i = 0; i < NumberOfParticles; i++)
-	      ParticleAttribute[j][i] = float(temp[i]);
+	    H5E_BEGIN_TRY{
+	      dset_id = H5Dopen(file_id, ParticleAttributeLabel[j]);
+	    } H5E_END_TRY;
+
+	    if (dset_id != h5_error) {
+	      h5_status = H5Dclose(dset_id);
+	      if (io_log) fprintf(log_fptr, "H5Dclose: %"ISYM"\n", h5_status);
+	      if( h5_status == h5_error ){ENZO_FAIL("line 881a Grid_ReadGrid \n");}
+
+	      file_dsp_id = H5Screate_simple((Eint32) 1, TempIntArray, NULL);
+	      if (io_log) fprintf(log_fptr, "H5Screate file_dsp_id: %"ISYM"\n", file_dsp_id);
+	      if( file_dsp_id == h5_error ){ENZO_FAIL("line 863  Grid_ReadGrid \n");}
+
+	      if (io_log) fprintf(log_fptr,"H5Dopen with Name = %s\n",ParticleAttributeLabel[j]);
+
+	      dset_id =  H5Dopen(file_id, ParticleAttributeLabel[j]);
+	      if (io_log) fprintf(log_fptr, "H5Dopen id: %"ISYM"\n", dset_id);
+	      if( dset_id == h5_error ){ENZO_FAIL("line 869  Grid_ReadGrid \n");}
+
+	      h5_status = H5Dread(dset_id, float_type_id, H5S_ALL, H5S_ALL, H5P_DEFAULT, (VOIDP) temp);
+	      if (io_log) fprintf(log_fptr, "H5Dread: %"ISYM"\n", h5_status);
+	      if( h5_status == h5_error ){ENZO_FAIL("line 873  Grid_ReadGrid \n");}
+
+	      h5_status = H5Sclose(file_dsp_id);
+	      if (io_log) fprintf(log_fptr, "H5Sclose: %"ISYM"\n", h5_status);
+	      if( h5_status == h5_error ){ENZO_FAIL("line 877  Grid_ReadGrid \n");}
+
+	      h5_status = H5Dclose(dset_id);
+	      if (io_log) fprintf(log_fptr, "H5Dclose: %"ISYM"\n", h5_status);
+	      if( h5_status == h5_error ){ENZO_FAIL("line 881  Grid_ReadGrid \n");}
+
+	      for (i = 0; i < NumberOfParticles; i++)
+		ParticleAttribute[j][i] = float(temp[i]);
+	    } else {
+	      for (i = 0; i < NumberOfParticles; i++)
+		ParticleAttribute[j][i] = 0;
+	      if (!warned_missing_particle_attribute &&
+		  MyProcessorNumber == ROOT_PROCESSOR) {
+		fprintf(stderr, "INFO [MBHFB]: missing particle attribute '%s' "
+			"in %s; zero-initializing this slot.\n",
+			ParticleAttributeLabel[j], name);
+		warned_missing_particle_attribute = TRUE;
+	      }
+	    }
 	    
 	  }
 	} // ENDELSE AddParticleAttributes 
@@ -1111,4 +1143,3 @@ int ReadField(float *temp, int Dims[], int Rank, char *name,
   return SUCCESS;
 }
 #endif /* USE_HDF4 */
-

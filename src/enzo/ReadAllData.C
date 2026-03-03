@@ -155,6 +155,14 @@ int ReadAllData(char *name, HierarchyEntry *TopGrid, TopGridData &MetaData,
 
   }
 
+  if (MBHFeedback > 0 && NumberOfParticleAttributes < 4) {
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr, "INFO [MBHFB]: MBHFeedback=%"ISYM" requires "
+              "NumberOfParticleAttributes>=4; increasing %"ISYM" -> 4.\n",
+              MBHFeedback, NumberOfParticleAttributes);
+    NumberOfParticleAttributes = 4;
+  }
+
   /* Read Boundary condition info. */
   fprintf(stderr, "fopen: opening boundary condition file: %s\n", MetaData.BoundaryConditionName);
  
