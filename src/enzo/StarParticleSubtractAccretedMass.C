@@ -93,6 +93,12 @@ int StarParticleSubtractAccretedMass(TopGridData *MetaData,
     if (ABS(cstar->ReturnType()) == MBH && MBHAccretion <= 0)
       continue;
 
+    /* MBH mass subtraction runs only at the finest level -- matches accretion
+       gate in StarParticleAccretion.C:73-74. */
+    if (ABS(cstar->ReturnType()) == MBH &&
+	level < MAX_DEPTH_OF_HIERARCHY && LevelArray[level+1] != NULL)
+      continue;
+
     /* Now let us do the job! */
 
     switch (cstar->ReturnType()) {

@@ -106,6 +106,17 @@ int StarParticleAddFeedback(TopGridData *MetaData,
 	!cstar->ApplyFeedbackTrue(SNe_dt))
       continue;
 
+    /* MBH feedback runs only at the finest level -- matches accretion gate
+       in StarParticleAccretion.C:73-74.  The deposition loop below already
+       walks grids on level+1 ... MAX_DEPTH_OF_HIERARCHY, so energy is still
+       deposited on
+       all overlapping grids. */
+    if (ABS(cstar->ReturnType()) == MBH &&
+	(cstar->ReturnFeedbackFlag() == MBH_THERMAL ||
+	 cstar->ReturnFeedbackFlag() == MBH_JETS) &&
+	level < MAX_DEPTH_OF_HIERARCHY && LevelArray[level+1] != NULL)
+      continue;
+
     dtForThisStar = LevelArray[level]->GridData->ReturnTimeStep();
 	  
     /* Compute some parameters */
