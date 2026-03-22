@@ -163,6 +163,16 @@ int ReadAllData(char *name, HierarchyEntry *TopGrid, TopGridData &MetaData,
     NumberOfParticleAttributes = 4;
   }
 
+  if (BHSeedingMethod &&
+      NumberOfParticleAttributes < PARTICLE_ATTRIBUTE_BHSEED_REQUIRED) {
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr, "INFO [BHSEED]: BHSeedingMethod=%"ISYM" requires "
+              "NumberOfParticleAttributes>=%"ISYM"; increasing %"ISYM" -> %"ISYM".\n",
+              BHSeedingMethod, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED,
+              NumberOfParticleAttributes, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
+    NumberOfParticleAttributes = PARTICLE_ATTRIBUTE_BHSEED_REQUIRED;
+  }
+
   /* Read Boundary condition info. */
   fprintf(stderr, "fopen: opening boundary condition file: %s\n", MetaData.BoundaryConditionName);
  

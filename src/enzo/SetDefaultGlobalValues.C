@@ -744,8 +744,8 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   MBHInsertLocationFilename        = (char*) "mbh_insert_location.in";
   OutputWhenJetsHaveNotEjected     = FALSE;
 
-  BHSeedingMethod                  = 0;
-  BHSeedOverdensityThreshold       = 100.0;
+  BHSeedingMethod                  = 1;
+  BHSeedOverdensityThreshold       = 1000.0;
   BHSeedMetallicityThreshold       = 1.0e-4;
   BHSeedMetallicityThresholdInSolar = FLOAT_UNDEFINED;
   BHSeedMass                       = 1.0e5;
@@ -754,7 +754,19 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHSeedVelDivCrit                 = TRUE;
   BHSeedThermalCrit                = FALSE;
   BHSeedSelfBoundCrit              = FALSE;
-  BHSeedRunEveryTimestep           = TRUE;
+  BHSeedRequireFinestLevel         = TRUE;
+  BHSeedRequireLocalPeak           = TRUE;
+  BHSeedPatchRadius                = 3.0;    // Phase 2+: not yet active
+  BHSeedMinEnclosedMass            = 1.0e6;  // Phase 2+: not yet active
+  BHSeedChannel                    = 0;
+  BHSeedExclusionMode              = 2;      // Phase 3+: not yet active
+  BHSeedExclusionCells             = 16;     // Phase 3+: not yet active
+  BHSeedMinCandidateSeparation     = 3.0;    // Phase 3+: not yet active
+  BHSeedMaxPerPass                 = 10;     // Phase 3+: not yet active
+  BHSeedRunEveryTimestep           = FALSE;
+  BHSeedRankingOrder               = 0;      // Phase 3+: not yet active
+  BHSeedVerbose                    = 1;
+  BHSeedDeterministicTiebreak      = TRUE;   // Phase 3+: not yet active
 
   H2StarMakerEfficiency = 0.01;
   H2StarMakerNumberDensityThreshold = 0.0;

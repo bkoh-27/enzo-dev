@@ -331,6 +331,16 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
     NumberOfParticleAttributes = 4;
   }
 
+  if (BHSeedingMethod &&
+      NumberOfParticleAttributes < PARTICLE_ATTRIBUTE_BHSEED_REQUIRED) {
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr, "INFO [BHSEED]: BHSeedingMethod=%"ISYM" requires "
+              "NumberOfParticleAttributes>=%"ISYM"; increasing %"ISYM" -> %"ISYM".\n",
+              BHSeedingMethod, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED,
+              NumberOfParticleAttributes, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
+    NumberOfParticleAttributes = PARTICLE_ATTRIBUTE_BHSEED_REQUIRED;
+  }
+
   // Give unset parameters their default values
  
   for (dim = 0; dim < MAX_DIMENSION; dim++) {

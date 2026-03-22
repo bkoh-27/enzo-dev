@@ -316,6 +316,59 @@ const star_type
   CenOstriker = PARTICLE_TYPE_STAR,
   AccretingParticle = PARTICLE_TYPE_MUST_REFINE;
 
+/* Particle attribute slot convention.
+   Legacy slots:
+     0 = creation_time (BirthTime)
+     1 = dynamical_time (LifeTime)
+     2 = metallicity_fraction
+     3 = typeia_fraction / MBH last_accretion_rate
+   Locked BH seeding v1.5 metadata slots (Phase 1 scaffolding):
+#ifdef WINDS
+     7 = BHSeedChannel
+     8 = BHSeedRedshift
+     9 = BHSeedPatchMass
+    10 = BHSeedPatchMetallicity
+    11 = BHSeedPatchDensityPeak
+    12 = BHSeedKernelComplete
+    13 = BHSeedHostDMDensity
+    14 = BHSeedAcceptRank
+#else
+     4 = BHSeedChannel
+     5 = BHSeedRedshift
+     6 = BHSeedPatchMass
+     7 = BHSeedPatchMetallicity
+     8 = BHSeedPatchDensityPeak
+     9 = BHSeedKernelComplete
+    10 = BHSeedHostDMDensity
+    11 = BHSeedAcceptRank
+#endif
+*/
+const int PARTICLE_ATTRIBUTE_CREATION_TIME          = 0;
+const int PARTICLE_ATTRIBUTE_DYNAMICAL_TIME         = 1;
+const int PARTICLE_ATTRIBUTE_METALLICITY_FRACTION   = 2;
+const int PARTICLE_ATTRIBUTE_TYPEIA_OR_MBH_LAR      = 3;
+#ifdef WINDS
+const int PARTICLE_ATTRIBUTE_BHSEED_CHANNEL         = 7;
+const int PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT        = 8;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS      = 9;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY = 10;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK = 11;
+const int PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE = 12;
+const int PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY = 13;
+const int PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK     = 14;
+#else
+const int PARTICLE_ATTRIBUTE_BHSEED_CHANNEL         = 4;
+const int PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT        = 5;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS      = 6;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY = 7;
+const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK = 8;
+const int PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE = 9;
+const int PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY = 10;
+const int PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK     = 11;
+#endif
+const int PARTICLE_ATTRIBUTE_BHSEED_REQUIRED =
+  PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK + 1;
+
 /* Define a float/int union. */
 
 union float_int {

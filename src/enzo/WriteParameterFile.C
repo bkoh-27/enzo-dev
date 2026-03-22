@@ -1075,6 +1075,8 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHSeedingMethod             = %"ISYM"\n", BHSeedingMethod);
   fprintf(fptr, "BHSeedOverdensityThreshold  = %"GOUTSYM"\n", BHSeedOverdensityThreshold);
   fprintf(fptr, "BHSeedMetallicityThreshold  = %"GOUTSYM"\n", BHSeedMetallicityThreshold);
+  fprintf(fptr, "BHSeedMetallicityThresholdInSolar = %"GOUTSYM"\n",
+          BHSeedMetallicityThresholdInSolar);
   fprintf(fptr, "BHSeedMass                  = %"GOUTSYM"\n", BHSeedMass);
   fprintf(fptr, "BHSeedTemperatureThreshold  = %"GOUTSYM"\n", BHSeedTemperatureThreshold);
   fprintf(fptr, "BHSeedExclusionRadius       = %"GOUTSYM"  # physical kpc\n",
@@ -1082,7 +1084,21 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHSeedVelDivCrit            = %"ISYM"\n", BHSeedVelDivCrit);
   fprintf(fptr, "BHSeedThermalCrit           = %"ISYM"\n", BHSeedThermalCrit);
   fprintf(fptr, "BHSeedSelfBoundCrit         = %"ISYM"\n", BHSeedSelfBoundCrit);
-  fprintf(fptr, "BHSeedRunEveryTimestep      = %"ISYM"\n\n", BHSeedRunEveryTimestep);
+  fprintf(fptr, "BHSeedRequireFinestLevel    = %"ISYM"\n", BHSeedRequireFinestLevel);
+  fprintf(fptr, "BHSeedRequireLocalPeak      = %"ISYM"\n", BHSeedRequireLocalPeak);
+  fprintf(fptr, "BHSeedPatchRadius           = %"GOUTSYM"\n", BHSeedPatchRadius);
+  fprintf(fptr, "BHSeedMinEnclosedMass       = %"GOUTSYM"\n", BHSeedMinEnclosedMass);
+  fprintf(fptr, "BHSeedChannel               = %"ISYM"\n", BHSeedChannel);
+  fprintf(fptr, "BHSeedExclusionMode         = %"ISYM"\n", BHSeedExclusionMode);
+  fprintf(fptr, "BHSeedExclusionCells        = %"ISYM"\n", BHSeedExclusionCells);
+  fprintf(fptr, "BHSeedMinCandidateSeparation = %"GOUTSYM"\n",
+          BHSeedMinCandidateSeparation);
+  fprintf(fptr, "BHSeedMaxPerPass            = %"ISYM"\n", BHSeedMaxPerPass);
+  fprintf(fptr, "BHSeedRunEveryTimestep      = %"ISYM"\n", BHSeedRunEveryTimestep);
+  fprintf(fptr, "BHSeedRankingOrder          = %"ISYM"\n", BHSeedRankingOrder);
+  fprintf(fptr, "BHSeedVerbose               = %"ISYM"\n", BHSeedVerbose);
+  fprintf(fptr, "BHSeedDeterministicTiebreak = %"ISYM"\n\n",
+          BHSeedDeterministicTiebreak);
 
   fprintf(fptr, "MBHParticleIO                         = %"ISYM"\n",
 	  MBHParticleIO);

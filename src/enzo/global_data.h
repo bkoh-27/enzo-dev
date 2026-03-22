@@ -1125,7 +1125,19 @@ EXTERN float BHSeedExclusionRadius;              // physical kpc (default 100)
 EXTERN int   BHSeedVelDivCrit;                   // require converging flow
 EXTERN int   BHSeedThermalCrit;                  // require tcool < tdyn
 EXTERN int   BHSeedSelfBoundCrit;                // require alpha < 1
+EXTERN int   BHSeedRequireFinestLevel;           // Phase 1 active gate
+EXTERN int   BHSeedRequireLocalPeak;             // Phase 1 active gate
+EXTERN float BHSeedPatchRadius;                  // Phase 2+: not yet active
+EXTERN float BHSeedMinEnclosedMass;              // Phase 2+: not yet active
+EXTERN int   BHSeedChannel;                      // Phase 1 metadata
+EXTERN int   BHSeedExclusionMode;                // Phase 3+: not yet active
+EXTERN int   BHSeedExclusionCells;               // Phase 3+: not yet active
+EXTERN float BHSeedMinCandidateSeparation;       // Phase 3+: not yet active
+EXTERN int   BHSeedMaxPerPass;                   // Phase 3+: not yet active
 EXTERN int   BHSeedRunEveryTimestep;             // run every sub-cycle timestep
+EXTERN int   BHSeedRankingOrder;                 // Phase 3+: not yet active
+EXTERN int   BHSeedVerbose;                      // Phase 1 active (log detail)
+EXTERN int   BHSeedDeterministicTiebreak;        // Phase 3+: not yet active
 
 /* Star Class Radiation Particle IO (PARTICLE_TYPE_RAD) */
 EXTERN char *RadiationSourcesFileName;

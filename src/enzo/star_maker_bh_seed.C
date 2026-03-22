@@ -41,11 +41,12 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                        float *dx, float *d1, float *t1,
                        float *odthresh, float *metalthresh, float *tempthresh,
                        int *veldivcrit, int *thermalcrit, int *selfboundcrit,
+                       int *requirefinestlevel, int *requirelocalpeak,
                        int *ncand, int *cand_index, float *cand_density,
                        int *diag)
 {
   *ncand = 0;
-  for (int n = 0; n < 6; n++)
+  for (int n = 0; n < 8; n++)
     diag[n] = 0;
 
   const int xo = 1;
@@ -65,8 +66,10 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
       int index = (k * (*ny) + j) * (*nx) + *ibuff;
       for (int i = *ibuff; i < *nx - *ibuff; i++, index++) {
 
-        if (r[index] != 0.0f)
+        if (*requirefinestlevel == 1 && r[index] != 0.0f) {
+          diag[6]++;
           continue;
+        }
 
         if (d[index] < *odthresh) {
           diag[0]++;
@@ -125,6 +128,37 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                               (GravConst * d[index]);
           if (alpha >= 1.0f) {
             diag[5]++;
+            continue;
+          }
+        }
+
+        if (*requirelocalpeak == 1) {
+          int is_local_peak = TRUE;
+          for (int kk = -1; kk <= 1 && is_local_peak; kk++)
+            for (int jj = -1; jj <= 1 && is_local_peak; jj++)
+              for (int ii = -1; ii <= 1; ii++) {
+                if (ii == 0 && jj == 0 && kk == 0)
+                  continue;
+
+                int ni = i + ii;
+                int nj = j + jj;
+                int nk = k + kk;
+
+                /* Out-of-bounds neighbors are treated as rho=0 for Phase 1. */
+                if (ni < 0 || ni >= *nx ||
+                    nj < 0 || nj >= *ny ||
+                    nk < 0 || nk >= *nz)
+                  continue;
+
+                int nindex = (nk * (*ny) + nj) * (*nx) + ni;
+                if (d[index] < d[nindex]) {
+                  is_local_peak = FALSE;
+                  break;
+                }
+              }
+
+          if (!is_local_peak) {
+            diag[7]++;
             continue;
           }
         }
