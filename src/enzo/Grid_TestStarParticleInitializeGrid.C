@@ -65,7 +65,10 @@ int grid::TestStarParticleInitializeGrid(float TestStarParticleStarMass,
   /* Set number of particles for this grid and allocate space. */
 
   NumberOfParticles = 1;
-  NumberOfParticleAttributes = 4;
+  int required_attributes = 4;
+  if (BHSeedingMethod)
+    required_attributes = max(required_attributes, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
+  NumberOfParticleAttributes = max(NumberOfParticleAttributes, required_attributes);
   this->AllocateNewParticles(NumberOfParticles);
   printf("Allocated %d particles\n", NumberOfParticles);
 
@@ -97,4 +100,3 @@ int grid::TestStarParticleInitializeGrid(float TestStarParticleStarMass,
 
   return SUCCESS;
 }
-
