@@ -22,18 +22,27 @@ The BH seeding pass runs before normal star formation when `BHSeedingMethod = 1`
 ## How Seeding Works (Simple Version)
 For each level pass:
 1. Collect existing BH/MBH positions.
-2. Find gas cells that pass local gates:
-   - dense enough,
-   - cool enough,
-   - metal-poor enough,
-   - and optional extra checks (converging flow / thermal / self-bound).
-3. If `BHSeedRequireFinestLevel = 1`, reject cells covered by a finer AMR grid.
-4. If `BHSeedRequireLocalPeak = 1`, require candidate density to be a local 26-neighbor peak.
+2. If `BHSeedRequireFinestLevel = 1`, reject cells covered by a finer AMR grid.
+3. Apply local gates in order:
+   - density threshold,
+   - local 26-neighbor peak check (`BHSeedRequireLocalPeak`),
+   - temperature,
+   - metallicity,
+   - optional extra checks (converging flow / thermal / self-bound).
+4. Run the legacy per-cell mass check:
+   - `BHSeedLegacyCellMassGate = 0` (default): shadow diagnostic only,
+   - `BHSeedLegacyCellMassGate = 1`: hard reject.
 5. Reject candidates too close to existing BHs using a linked-cell spatial hash.
-6. Reject candidates that do not have enough gas mass for `BHSeedMass`.
-7. Choose one deterministic winner globally (MPI-safe).
-8. Create at most one MBH per level pass.
-9. Print a `[BHSEED]` diagnostic line (and `[BHSEED_SEED]` lines when verbose logging is on).
+6. Evaluate spherical kernel properties around each surviving candidate:
+   - enclosed gas mass,
+   - mass-weighted metallicity,
+   - kernel density peak,
+   - kernel completeness flag.
+7. Reject candidates with enclosed mass below `BHSeedMinEnclosedMass`.
+8. Choose one deterministic winner globally (MPI-safe, still one winner per pass).
+9. Create at most one MBH per level pass and write per-seed metadata.
+10. Mark the seeded cell so star formation skips that exact cell in the same pass.
+11. Print a `[BHSEED]` diagnostic line (and `[BHSEED_SEED]` lines when verbose logging is on).
 
 ## BH Parameters (Beginner Table)
 Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
@@ -48,10 +57,11 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 | `BHSeedVelDivCrit` | `1` | `int (bool-style)`, **Phase 1 active**. If `1`, require converging flow (`div(v) < 0`). | boolean-style int |
 | `BHSeedThermalCrit` | `0` | `int (bool-style)`, **Phase 1 active**. If `1`, apply cooling-time criterion (`tcool` vs `tdyn`). | boolean-style int |
 | `BHSeedSelfBoundCrit` | `0` | `int (bool-style)`, **Phase 1 active**. If `1`, require self-bound gas (`alpha < 1`). | boolean-style int |
+| `BHSeedLegacyCellMassGate` | `0` | `int (bool-style)`, **Phase 2 active**. `0` = shadow-only legacy cell-mass diagnostic, `1` = hard reject when cell gas mass `< BHSeedMass`. | boolean-style int |
 | `BHSeedRequireFinestLevel` | `1` | `int (bool-style)`, **Phase 1 active**. If `1`, reject cells covered by finer grids. | boolean-style int |
 | `BHSeedRequireLocalPeak` | `1` | `int (bool-style)`, **Phase 1 active**. If `1`, require candidate density to be a 26-neighbor local peak. | boolean-style int |
-| `BHSeedPatchRadius` | `3.0` | `float`, **parsed-only placeholder (Phase 2+)**. Reserved for kernel enclosed-property evaluation. | cells |
-| `BHSeedMinEnclosedMass` | `1e6` | `float`, **parsed-only placeholder (Phase 2+)**. Reserved enclosed-mass threshold. | Msun |
+| `BHSeedPatchRadius` | `3.0` | `float`, **Phase 2 active**. Radius of spherical enclosed-property kernel on the candidate grid. | code length |
+| `BHSeedMinEnclosedMass` | `1e6` | `float`, **Phase 2 active**. Minimum enclosed gas mass required by the kernel gate. | Msun |
 | `BHSeedMass` | `1e5` | `float`, **Phase 1 active**. Mass of each seeded BH particle. | Msun |
 | `BHSeedChannel` | `0` | `int`, **Phase 1 active (metadata)**. Stored on each created BH in seed metadata (`bhseed_channel`). | channel id |
 | `BHSeedExclusionMode` | `2` | `int`, **parsed-only placeholder (Phase 3+)**. Future exclusion algorithm selector. | mode id |
@@ -61,7 +71,7 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 | `BHSeedMaxPerPass` | `10` | `int`, **parsed-only placeholder (Phase 3+)**. Future per-pass multi-seed cap. | count |
 | `BHSeedRunEveryTimestep` | `0` | `int (bool-style)`, **Phase 1 active**. If `1`, run every sub-cycle; if `0`, run with root-grid cadence logic. | boolean-style int |
 | `BHSeedRankingOrder` | `0` | `int`, **parsed-only placeholder (Phase 3+)**. Future ranking-order selector for tie resolution. | enum id |
-| `BHSeedVerbose` | `1` | `int`, **Phase 1 active**. Controls BH seeding log verbosity (`[BHSEED]` + `[BHSEED_SEED]`). | verbosity level |
+| `BHSeedVerbose` | `1` | `int`, **Phase 2 active**. Controls BH seeding log verbosity (`[BHSEED]` + `[BHSEED_SEED]` kernel metadata line). | verbosity level |
 | `BHSeedDeterministicTiebreak` | `1` | `int (bool-style)`, **parsed-only placeholder (Phase 3+)**. Reserved deterministic tie-break selector. | boolean-style int |
 
 ### Important Unit Note for `BHSeedExclusionRadius`
@@ -83,8 +93,8 @@ BHSeedOverdensityThreshold        = 1000
 BHSeedTemperatureThreshold        = 1e4
 BHSeedMetallicityThreshold        = 1e-4
 BHSeedMetallicityThresholdInSolar = 1e-4
-BHSeedPatchRadius                 = 3.0      # Phase 2+ parsed-only in Phase 1
-BHSeedMinEnclosedMass             = 1e6      # Phase 2+ parsed-only in Phase 1
+BHSeedPatchRadius                 = 3.0
+BHSeedMinEnclosedMass             = 1e6
 BHSeedMass                        = 1e5
 BHSeedChannel                     = 0
 BHSeedExclusionMode               = 2        # Phase 3+ parsed-only in Phase 1
@@ -95,6 +105,7 @@ BHSeedMaxPerPass                  = 10       # Phase 3+ parsed-only in Phase 1
 BHSeedRunEveryTimestep            = 0
 BHSeedRankingOrder                = 0        # Phase 3+ parsed-only in Phase 1
 BHSeedVelDivCrit                  = 1
+BHSeedLegacyCellMassGate          = 0
 BHSeedThermalCrit                 = 0
 BHSeedSelfBoundCrit               = 0
 BHSeedRequireFinestLevel          = 1
@@ -112,6 +123,8 @@ cell_code=... nbins=... ncand_local_min=... ncand_local_max=... ncand_global=...
 ngates_density=... ngates_temp=... ngates_metal=... ngates_conv=... ngates_cool=...
 ngates_bound=... ngates_mass=... dist_blocked=... created=... total_mbh=... pre_cache_bh=...
 ngates_finestlevel=... ngates_peak=...
+nkernel_evaluated=... nkernel_truncated=... nlegacy_cellmass_would_fail=...
+ngates_enclosedmass=... seeding_wall_ms=...
 ```
 
 Key fields:
@@ -123,9 +136,14 @@ Key fields:
 - `pre_cache_bh`: BH count already in cache before this pass.
 - `ngates_finestlevel`: candidates rejected because cell is covered by finer AMR grid.
 - `ngates_peak`: candidates rejected by 26-neighbor local density peak check.
+- `nkernel_evaluated`: candidates that reached kernel evaluation.
+- `nkernel_truncated`: kernel evaluations marked incomplete (`BHSeedKernelComplete=0`).
+- `nlegacy_cellmass_would_fail`: shadow count for legacy cell-mass check.
+- `ngates_enclosedmass`: candidates rejected by `BHSeedMinEnclosedMass`.
+- `seeding_wall_ms`: wall-clock time for the full level seeding pass (ms).
 
 Log compatibility note:
-- `ngates_finestlevel` and `ngates_peak` are appended at the end of the existing `[BHSEED]` line after all legacy fields.
+- New fields are appended at the end of the existing `[BHSEED]` line after all legacy and Phase 1 fields.
 
 When `BHSeedVerbose >= 1`, each created seed also emits:
 
@@ -135,23 +153,24 @@ patch_metal=... patch_density_peak=... kernel_complete=... host_dm_density=... a
 ```
 
 This line reports per-seed metadata values written into particle attributes/HDF5.
+`patch_density_peak` is the kernel maximum (not the candidate-cell density placeholder used in Phase 1).
 
-## Seed Metadata Fields (Phase 1)
+## Seed Metadata Fields (Phase 2)
 The BH seeding path stores 8 metadata attributes on MBH particles.
 All are checkpoint/restart-safe and migrate with particles across MPI ranks.
 
 Note on storage type:
 - particle attributes are float-typed arrays, so int-semantic fields are stored as float and cast back to int when read for logging/analysis.
 
-| Metadata field | HDF5 dataset label | Slot index (`no WINDS` / `WINDS`) | Phase 1 value | Phase status |
+| Metadata field | HDF5 dataset label | Slot index (`no WINDS` / `WINDS`) | Phase 2 value | Phase status |
 | --- | --- | --- | --- | --- |
-| `BHSeedChannel` | `bhseed_channel` | `4 / 7` | parameter value `BHSeedChannel` | active in Phase 1 |
-| `BHSeedRedshift` | `bhseed_redshift` | `5 / 8` | current redshift (or `0` in non-cosmological runs) | active in Phase 1 |
-| `BHSeedPatchMass` | `bhseed_patch_mass` | `6 / 9` | `-1.0` | placeholder (Phase 2+) |
-| `BHSeedPatchMetallicity` | `bhseed_patch_metallicity` | `7 / 10` | `-1.0` | placeholder (Phase 2+) |
-| `BHSeedPatchDensityPeak` | `bhseed_patch_density_peak` | `8 / 11` | candidate-cell density | active in Phase 1 |
-| `BHSeedKernelComplete` | `bhseed_kernel_complete` | `9 / 12` | `-1.0` (`-1` semantic) | placeholder (Phase 2+) |
-| `BHSeedHostDMDensity` | `bhseed_host_dm_density` | `10 / 13` | `-1.0` | placeholder (Phase 2+) |
+| `BHSeedChannel` | `bhseed_channel` | `4 / 7` | parameter value `BHSeedChannel` | active in Phase 1+ |
+| `BHSeedRedshift` | `bhseed_redshift` | `5 / 8` | current redshift (or `0` in non-cosmological runs) | active in Phase 1+ |
+| `BHSeedPatchMass` | `bhseed_patch_mass` | `6 / 9` | kernel enclosed gas mass | active in Phase 2 |
+| `BHSeedPatchMetallicity` | `bhseed_patch_metallicity` | `7 / 10` | kernel mass-weighted metallicity | active in Phase 2 |
+| `BHSeedPatchDensityPeak` | `bhseed_patch_density_peak` | `8 / 11` | maximum density inside evaluated kernel | active in Phase 2 |
+| `BHSeedKernelComplete` | `bhseed_kernel_complete` | `9 / 12` | `1` complete, `0` truncated | active in Phase 2 |
+| `BHSeedHostDMDensity` | `bhseed_host_dm_density` | `10 / 13` | local DM density if available, else `-1.0` | active in Phase 2 |
 | `BHSeedAcceptRank` | `bhseed_accept_rank` | `11 / 14` | `-1.0` (`-1` semantic) | placeholder (Phase 3+) |
 
 Quick inspection example:
@@ -270,7 +289,8 @@ Expected result:
 - same key behavior as single-rank run:
   - line 1 has `created=1`,
   - line 2 has `dist_blocked=2` and `created=0`.
-  - appended Phase 1 counters appear at line end (`ngates_finestlevel`, `ngates_peak`).
+  - appended Phase 1 counters appear at line end (`ngates_finestlevel`, `ngates_peak`),
+  - appended Phase 2 counters also appear at line end (`nkernel_evaluated`, `nkernel_truncated`, `nlegacy_cellmass_would_fail`, `ngates_enclosedmass`, `seeding_wall_ms`).
 
 ### Step 5: Run Built-In Assertions
 ```bash
