@@ -33,11 +33,12 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                        float *dx, float *d1, float *t1,
                        float *odthresh, float *metalthresh, float *tempthresh,
                        int *veldivcrit, int *thermalcrit, int *selfboundcrit,
+                       int *requirefinestlevel, int *requirelocalpeak,
                        int *ncand, int *cand_index, float *cand_density,
                        int *diag);
 
 int BHSeedIsActive();
-void BHSeedAccumulateKernelDiagnostics(int ncand, const int diag[6]);
+void BHSeedAccumulateKernelDiagnostics(int ncand, const int diag[8]);
 void BHSeedAddDistBlocked(long long nblocked);
 void BHSeedAddMassGate(long long ngated);
 int BHSeedCandidateBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos);
@@ -76,7 +77,7 @@ int mbh_maker2(grid *ThisGrid,
   }
   int *cand_index = &cand_index_scratch[0];
   float *cand_density = &cand_density_scratch[0];
-  int diag[6];
+  int diag[8];
   int ncand_local = 0;
   int ibuff = NumberOfGhostZones;
   int imethod = HydroMethod;
@@ -93,7 +94,9 @@ int mbh_maker2(grid *ThisGrid,
                          &BHSeedMetallicityThreshold,
                          &BHSeedTemperatureThreshold,
                          &BHSeedVelDivCrit, &BHSeedThermalCrit,
-                         &BHSeedSelfBoundCrit, &ncand_local, cand_index,
+                         &BHSeedSelfBoundCrit,
+                         &BHSeedRequireFinestLevel, &BHSeedRequireLocalPeak,
+                         &ncand_local, cand_index,
                          cand_density, diag) == FAIL) {
     return FAIL;
   }

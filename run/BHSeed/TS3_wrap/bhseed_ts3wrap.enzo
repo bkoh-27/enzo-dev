@@ -36,6 +36,8 @@ BHSeedMass                 = 1.0
 BHSeedVelDivCrit           = 0
 BHSeedThermalCrit          = 0
 BHSeedSelfBoundCrit        = 0
+BHSeedRequireFinestLevel  = 0
+BHSeedRequireLocalPeak    = 0
 BHSeedRunEveryTimestep     = 1
 
 # ---- Star formation OFF ----

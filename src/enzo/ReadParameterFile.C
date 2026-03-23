@@ -1108,8 +1108,24 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHSeedVelDivCrit = %"ISYM, &BHSeedVelDivCrit);
     ret += sscanf(line, "BHSeedThermalCrit = %"ISYM, &BHSeedThermalCrit);
     ret += sscanf(line, "BHSeedSelfBoundCrit = %"ISYM, &BHSeedSelfBoundCrit);
+    ret += sscanf(line, "BHSeedRequireFinestLevel = %"ISYM,
+		  &BHSeedRequireFinestLevel);
+    ret += sscanf(line, "BHSeedRequireLocalPeak = %"ISYM,
+		  &BHSeedRequireLocalPeak);
+    ret += sscanf(line, "BHSeedPatchRadius = %"FSYM, &BHSeedPatchRadius);
+    ret += sscanf(line, "BHSeedMinEnclosedMass = %"FSYM, &BHSeedMinEnclosedMass);
+    ret += sscanf(line, "BHSeedChannel = %"ISYM, &BHSeedChannel);
+    ret += sscanf(line, "BHSeedExclusionMode = %"ISYM, &BHSeedExclusionMode);
+    ret += sscanf(line, "BHSeedExclusionCells = %"ISYM, &BHSeedExclusionCells);
+    ret += sscanf(line, "BHSeedMinCandidateSeparation = %"FSYM,
+		  &BHSeedMinCandidateSeparation);
+    ret += sscanf(line, "BHSeedMaxPerPass = %"ISYM, &BHSeedMaxPerPass);
     ret += sscanf(line, "BHSeedRunEveryTimestep = %"ISYM,
 		  &BHSeedRunEveryTimestep);
+    ret += sscanf(line, "BHSeedRankingOrder = %"ISYM, &BHSeedRankingOrder);
+    ret += sscanf(line, "BHSeedVerbose = %"ISYM, &BHSeedVerbose);
+    ret += sscanf(line, "BHSeedDeterministicTiebreak = %"ISYM,
+		  &BHSeedDeterministicTiebreak);
 
     ret += sscanf(line, "H2StarMakerEfficiency = %"FSYM,
 		  &H2StarMakerEfficiency);

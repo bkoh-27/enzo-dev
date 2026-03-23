@@ -94,10 +94,19 @@ int grid::Group_ReadGrid(FILE *fptr, int GridID, HDF5_hid_t file_id,
 #ifdef WINDS
   char *ParticleAttributeLabel[] =
     {"creation_time", "dynamical_time", "metallicity_fraction", "particle_jet_x", 
-     "particle_jet_y", "particle_jet_z", "typeia_fraction"};
+     "particle_jet_y", "particle_jet_z", "typeia_fraction",
+     "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
+     "bhseed_patch_metallicity", "bhseed_patch_density_peak",
+     "bhseed_kernel_complete", "bhseed_host_dm_density",
+     "bhseed_accept_rank", "particle_attribute_15"};
 #else
   char *ParticleAttributeLabel[] = 
-    {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction"};
+    {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
+     "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
+     "bhseed_patch_metallicity", "bhseed_patch_density_peak",
+     "bhseed_kernel_complete", "bhseed_host_dm_density",
+     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
+     "particle_attribute_14", "particle_attribute_15"};
 #endif
 
   int ReadOnlyActive = TRUE;

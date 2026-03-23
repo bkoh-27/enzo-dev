@@ -82,7 +82,7 @@ struct BHSeedGlobalState {
   float BestLocalCellWidthCode;
 
   long long NCandLocal;
-  long long DiagLocal[6];
+  long long DiagLocal[8];
   long long MassGateLocal;
   long long DistBlockedLocal;
   long long CreatedLocal;
@@ -108,7 +108,7 @@ static BHSeedGlobalState BHSeedState = {0, INT_UNDEFINED, FLOAT_UNDEFINED, 1.0,
                                         0, 0, 0,
                                         -1, NULL, -1, -1, -1, -1,
                                         0.0f, 0.0f,
-                                        0, {0, 0, 0, 0, 0, 0}, 0, 0, 0, 0};
+                                        0, {0, 0, 0, 0, 0, 0, 0, 0}, 0, 0, 0, 0};
 
 static int BHSeedStepCounter = 0;
 static int BHSeedCacheInitialized = FALSE;
@@ -141,7 +141,7 @@ static int BHSeedBin1D(FLOAT x, FLOAT left, FLOAT width, float cell_size, int nb
 static void BHSeedResetDiagnostics()
 {
   BHSeedState.NCandLocal = 0;
-  for (int n = 0; n < 6; n++)
+  for (int n = 0; n < 8; n++)
     BHSeedState.DiagLocal[n] = 0;
   BHSeedState.MassGateLocal = 0;
   BHSeedState.DistBlockedLocal = 0;
@@ -360,10 +360,10 @@ int BHSeedIsActive()
   return BHSeedState.Active;
 }
 
-void BHSeedAccumulateKernelDiagnostics(int ncand, const int diag[6])
+void BHSeedAccumulateKernelDiagnostics(int ncand, const int diag[8])
 {
   BHSeedState.NCandLocal += ncand;
-  for (int n = 0; n < 6; n++)
+  for (int n = 0; n < 8; n++)
     BHSeedState.DiagLocal[n] += diag[n];
 }
 
@@ -442,8 +442,9 @@ int BHSeedCreateLocalBestParticle()
   int Vel3Num = BHSeedState.BestLocalVel3Num;
   float bh_mass_code = BHSeedState.BestLocalBHMassCode;
   float cell_width = BHSeedState.BestLocalCellWidthCode;
+  const float seed_density_before = GridData->BaryonField[DensNum][index];
 
-  if (bh_mass_code <= 0.0f || bh_mass_code > GridData->BaryonField[DensNum][index]) {
+  if (bh_mass_code <= 0.0f || bh_mass_code > seed_density_before) {
     BHSeedState.MassGateLocal++;
     /* Particle not created; caller must check CreatedLocal before caching. */
     return SUCCESS;
@@ -484,18 +485,18 @@ int BHSeedCreateLocalBestParticle()
      AddOneParticleFromList expects code-mass units, so convert by cell volume. */
   p.Mass = bh_mass_code * pow(cell_width, 3);
 
-  if (NumberOfParticleAttributes > 0)
-    p.Attribute[0] = GridData->Time;
-  if (NumberOfParticleAttributes > 1)
-    p.Attribute[1] = 0.0f;
-  if (NumberOfParticleAttributes > 2) {
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_CREATION_TIME)
+    p.Attribute[PARTICLE_ATTRIBUTE_CREATION_TIME] = GridData->Time;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_DYNAMICAL_TIME)
+    p.Attribute[PARTICLE_ATTRIBUTE_DYNAMICAL_TIME] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_METALLICITY_FRACTION) {
     float metal_fraction = 0.0f;
     int SNColourNum, MetalNum, MBHColourNum, Galaxy1ColourNum, Galaxy2ColourNum;
     int MetalIaNum, MetalIINum;
     if (GridData->IdentifyColourFields(SNColourNum, MetalNum, MetalIaNum, MetalIINum,
                                        MBHColourNum, Galaxy1ColourNum, Galaxy2ColourNum)
         != FAIL) {
-      float den = GridData->BaryonField[DensNum][index];
+      float den = seed_density_before;
       if (den > 0.0f) {
         if (MetalNum != -1 && SNColourNum != -1)
           metal_fraction = (GridData->BaryonField[MetalNum][index] +
@@ -506,7 +507,30 @@ int BHSeedCreateLocalBestParticle()
           metal_fraction = GridData->BaryonField[SNColourNum][index] / den;
       }
     }
-    p.Attribute[2] = metal_fraction;
+    p.Attribute[PARTICLE_ATTRIBUTE_METALLICITY_FRACTION] = metal_fraction;
+  }
+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_CHANNEL) {
+    /* Stored in float slot; explicit int->float cast for restart-safe roundtrip. */
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_CHANNEL] = float(BHSeedChannel);
+  }
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT] = BHSeedState.Zred;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS] = -1.0f; // Phase 2+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY] = -1.0f; // Phase 2+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK] = seed_density_before;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE) {
+    /* Int semantic field stored in float slot; -1 means unresolved in Phase 1. */
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE] = -1.0f; // Phase 2+
+  }
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY] = -1.0f; // Phase 2+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK) {
+    /* Int semantic field stored in float slot; -1 means unresolved in Phase 1. */
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = -1.0f; // Phase 3+
   }
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
@@ -514,6 +538,39 @@ int BHSeedCreateLocalBestParticle()
 
   BHSeedRecordCreatedSeed(BHSeedState.BestLocalX, BHSeedState.BestLocalY,
                           BHSeedState.BestLocalZ);
+
+  if (BHSeedVerbose >= 1) {
+    FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    int seed_channel = (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_CHANNEL) ?
+      int(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_CHANNEL]) : -1;
+    int seed_kernel_complete =
+      (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE) ?
+      int(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE]) : -1;
+    int seed_accept_rank =
+      (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK) ?
+      int(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK]) : -1;
+
+    fprintf(logptr,
+            "[BHSEED_SEED] level=%d x=%.8g y=%.8g z=%.8g channel=%d redshift=%.8g "
+            "patch_mass=%.8g patch_metal=%.8g patch_density_peak=%.8g "
+            "kernel_complete=%d host_dm_density=%.8g accept_rank=%d\n",
+            BHSeedState.Level,
+            double(BHSeedState.BestLocalX), double(BHSeedState.BestLocalY),
+            double(BHSeedState.BestLocalZ),
+            seed_channel,
+            (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT) ?
+            double(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT]) : -1.0,
+            (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS) ?
+            double(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS]) : -1.0,
+            (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY) ?
+            double(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY]) : -1.0,
+            (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK) ?
+            double(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK]) : -1.0,
+            seed_kernel_complete,
+            (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY) ?
+            double(p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY]) : -1.0,
+            seed_accept_rank);
+  }
 
   return SUCCESS;
 }
@@ -787,21 +844,23 @@ int BHSeedFinalizeLevel()
       BHSeedAppendSeedToGlobalCache(best_x, best_y, best_z);
   }
 
-  long long local[10], global[10];
+  long long local[12], global[12];
   local[0] = BHSeedState.NCandLocal;
   for (int n = 0; n < 6; n++)
     local[n+1] = BHSeedState.DiagLocal[n];
   local[7] = BHSeedState.MassGateLocal;
   local[8] = BHSeedState.DistBlockedLocal;
   local[9] = BHSeedState.CreatedLocal;
+  local[10] = BHSeedState.DiagLocal[6];
+  local[11] = BHSeedState.DiagLocal[7];
 
 #ifdef USE_MPI
   if (NumberOfProcessors > 1)
-    MPI_Reduce(local, global, 10, MPI_LONG_LONG_INT, MPI_SUM,
+    MPI_Reduce(local, global, 12, MPI_LONG_LONG_INT, MPI_SUM,
                ROOT_PROCESSOR, MPI_COMM_WORLD);
   else
 #endif
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 12; i++)
       global[i] = local[i];
 
   long long ncand_min = BHSeedState.NCandLocal;
@@ -825,7 +884,8 @@ int BHSeedFinalizeLevel()
             "ncand_local_min=%lld ncand_local_max=%lld ncand_global=%lld "
             "ngates_density=%lld ngates_temp=%lld ngates_metal=%lld "
             "ngates_conv=%lld ngates_cool=%lld ngates_bound=%lld "
-            "ngates_mass=%lld dist_blocked=%lld created=%lld total_mbh=%d pre_cache_bh=%d\n",
+            "ngates_mass=%lld dist_blocked=%lld created=%lld total_mbh=%d pre_cache_bh=%d "
+            "ngates_finestlevel=%lld ngates_peak=%lld\n",
             BHSeedStepCounter, BHSeedState.Level, BHSeedState.Zred,
             double(BHSeedState.A)/(1.0 + InitialRedshift),
             BHSeedExclusionRadius, BHSeedState.ExclusionRadiusComKpcH,
@@ -834,7 +894,7 @@ int BHSeedFinalizeLevel()
             ncand_min, ncand_max, global[0],
             global[1], global[2], global[3], global[4], global[5], global[6],
             global[7], global[8], global[9], int(BHSeedState.X.size()),
-            BHSeedState.PreCacheBH);
+            BHSeedState.PreCacheBH, global[10], global[11]);
   }
 
   BHSeedState.Active = FALSE;
