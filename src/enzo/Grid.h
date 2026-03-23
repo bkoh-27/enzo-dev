@@ -1579,8 +1579,11 @@ iveParticles;};
        ParticlePosition[dim] = new FLOAT[NumberOfNewParticles];
        ParticleVelocity[dim] = new float[NumberOfNewParticles];
      }
-     for (int i = 0; i < NumberOfParticleAttributes; i++)
+     for (int i = 0; i < NumberOfParticleAttributes; i++) {
        ParticleAttribute[i] = new float[NumberOfNewParticles];
+       for (int j = 0; j < NumberOfNewParticles; j++)
+         ParticleAttribute[i][j] = 0.0f;
+     }
    };
 
 /* Particles: Copy pointers passed into into grid. */
