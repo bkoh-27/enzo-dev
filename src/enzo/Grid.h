@@ -239,6 +239,7 @@ class grid
                         int DensNum, int Vel1Num, int Vel2Num, int Vel3Num,
                         float *temperature, float *cooling_time, float *dmfield,
                         float *metal_fraction, int metal_field_present,
+                        int dm_field_present,
                         float CellWidthTemp,
                         float DensityUnits, float LengthUnits, float TimeUnits,
                         int MaximumRefinementLevel);

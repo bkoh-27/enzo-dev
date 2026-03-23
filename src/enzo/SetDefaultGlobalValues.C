@@ -754,10 +754,11 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHSeedVelDivCrit                 = TRUE;
   BHSeedThermalCrit                = FALSE;
   BHSeedSelfBoundCrit              = FALSE;
+  BHSeedLegacyCellMassGate        = 0;      // Phase 2: shadow-only by default
   BHSeedRequireFinestLevel         = TRUE;
   BHSeedRequireLocalPeak           = TRUE;
-  BHSeedPatchRadius                = 3.0;    // Phase 2+: not yet active
-  BHSeedMinEnclosedMass            = 1.0e6;  // Phase 2+: not yet active
+  BHSeedPatchRadius                = 3.0;    // Phase 2 active
+  BHSeedMinEnclosedMass            = 1.0e6;  // Phase 2 active
   BHSeedChannel                    = 0;
   BHSeedExclusionMode              = 2;      // Phase 3+: not yet active
   BHSeedExclusionCells             = 16;     // Phase 3+: not yet active

@@ -532,11 +532,17 @@ int grid::StarParticleHandler(HierarchyEntry* SubgridPointer, int level,
   if (NumberOfBaryonFields == 0)
     return SUCCESS;
  
-  /* First, set under_subgrid field */
+  /* First, set under_subgrid field. In Phase 2 with BH seeding enabled,
+     MBHMaker2Handler already prepared this mask and may mark seeded cells
+     for SF blocking, so preserve it when present. */
   HierarchyEntry *Subgrid;
-  this->ZeroSolutionUnderSubgrid(NULL, ZERO_UNDER_SUBGRID_FIELD);
-  for (Subgrid = SubgridPointer; Subgrid; Subgrid = Subgrid->NextGridThisLevel)
-    this->ZeroSolutionUnderSubgrid(Subgrid->GridData, ZERO_UNDER_SUBGRID_FIELD);
+  int reuse_bhseed_mask =
+    (BHSeedingMethod && BaryonField[NumberOfBaryonFields] != NULL);
+  if (!reuse_bhseed_mask) {
+    this->ZeroSolutionUnderSubgrid(NULL, ZERO_UNDER_SUBGRID_FIELD);
+    for (Subgrid = SubgridPointer; Subgrid; Subgrid = Subgrid->NextGridThisLevel)
+      this->ZeroSolutionUnderSubgrid(Subgrid->GridData, ZERO_UNDER_SUBGRID_FIELD);
+  }
 
   /* initialize */
  

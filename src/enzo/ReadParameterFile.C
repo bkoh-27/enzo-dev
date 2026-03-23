@@ -1108,6 +1108,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHSeedVelDivCrit = %"ISYM, &BHSeedVelDivCrit);
     ret += sscanf(line, "BHSeedThermalCrit = %"ISYM, &BHSeedThermalCrit);
     ret += sscanf(line, "BHSeedSelfBoundCrit = %"ISYM, &BHSeedSelfBoundCrit);
+    ret += sscanf(line, "BHSeedLegacyCellMassGate = %"ISYM,
+                  &BHSeedLegacyCellMassGate);
     ret += sscanf(line, "BHSeedRequireFinestLevel = %"ISYM,
 		  &BHSeedRequireFinestLevel);
     ret += sscanf(line, "BHSeedRequireLocalPeak = %"ISYM,
@@ -2182,6 +2184,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
       ENZO_FAIL("BHSeedExclusionRadius must be non-negative (units: physical kpc).");
     if (BHSeedOverdensityThreshold <= 0.0f)
       ENZO_FAIL("BHSeedOverdensityThreshold must be positive.");
+    if (BHSeedLegacyCellMassGate != 0 && BHSeedLegacyCellMassGate != 1)
+      ENZO_FAIL("BHSeedLegacyCellMassGate must be 0 (shadow) or 1 (hard gate).");
   }
 
   if (MyProcessorNumber == ROOT_PROCESSOR && BHSeedingMethod) {

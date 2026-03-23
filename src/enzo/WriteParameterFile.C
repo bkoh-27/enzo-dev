@@ -1084,6 +1084,7 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHSeedVelDivCrit            = %"ISYM"\n", BHSeedVelDivCrit);
   fprintf(fptr, "BHSeedThermalCrit           = %"ISYM"\n", BHSeedThermalCrit);
   fprintf(fptr, "BHSeedSelfBoundCrit         = %"ISYM"\n", BHSeedSelfBoundCrit);
+  fprintf(fptr, "BHSeedLegacyCellMassGate    = %"ISYM"\n", BHSeedLegacyCellMassGate);
   fprintf(fptr, "BHSeedRequireFinestLevel    = %"ISYM"\n", BHSeedRequireFinestLevel);
   fprintf(fptr, "BHSeedRequireLocalPeak      = %"ISYM"\n", BHSeedRequireLocalPeak);
   fprintf(fptr, "BHSeedPatchRadius           = %"GOUTSYM"\n", BHSeedPatchRadius);
