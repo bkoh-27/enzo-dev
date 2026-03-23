@@ -1,6 +1,6 @@
 /***********************************************************************
 /
-/  BH SEED CANDIDATE KERNEL (GATES 1-7)
+/  BH SEED CANDIDATE KERNEL (PHASE 2 GATE ORDER)
 /
 /  PURPOSE:
 /    Select candidate cells for BH seeding and collect gate diagnostics.
@@ -76,6 +76,38 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
           continue;
         }
 
+        /* Phase 2 gate order: local-peak check is immediately after density gate. */
+        if (*requirelocalpeak == 1) {
+          int is_local_peak = TRUE;
+          for (int kk = -1; kk <= 1 && is_local_peak; kk++)
+            for (int jj = -1; jj <= 1 && is_local_peak; jj++)
+              for (int ii = -1; ii <= 1; ii++) {
+                if (ii == 0 && jj == 0 && kk == 0)
+                  continue;
+
+                int ni = i + ii;
+                int nj = j + jj;
+                int nk = k + kk;
+
+                /* Out-of-bounds neighbors are treated as rho=0 by skipping compare. */
+                if (ni < 0 || ni >= *nx ||
+                    nj < 0 || nj >= *ny ||
+                    nk < 0 || nk >= *nz)
+                  continue;
+
+                int nindex = (nk * (*ny) + nj) * (*nx) + ni;
+                if (d[index] < d[nindex]) {
+                  is_local_peak = FALSE;
+                  break;
+                }
+              }
+
+          if (!is_local_peak) {
+            diag[7]++;
+            continue;
+          }
+        }
+
         if (temp[index] > *tempthresh) {
           diag[1]++;
           continue;
@@ -128,37 +160,6 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                               (GravConst * d[index]);
           if (alpha >= 1.0f) {
             diag[5]++;
-            continue;
-          }
-        }
-
-        if (*requirelocalpeak == 1) {
-          int is_local_peak = TRUE;
-          for (int kk = -1; kk <= 1 && is_local_peak; kk++)
-            for (int jj = -1; jj <= 1 && is_local_peak; jj++)
-              for (int ii = -1; ii <= 1; ii++) {
-                if (ii == 0 && jj == 0 && kk == 0)
-                  continue;
-
-                int ni = i + ii;
-                int nj = j + jj;
-                int nk = k + kk;
-
-                /* Out-of-bounds neighbors are treated as rho=0 for Phase 1. */
-                if (ni < 0 || ni >= *nx ||
-                    nj < 0 || nj >= *ny ||
-                    nk < 0 || nk >= *nz)
-                  continue;
-
-                int nindex = (nk * (*ny) + nj) * (*nx) + ni;
-                if (d[index] < d[nindex]) {
-                  is_local_peak = FALSE;
-                  break;
-                }
-              }
-
-          if (!is_local_peak) {
-            diag[7]++;
             continue;
           }
         }

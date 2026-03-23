@@ -675,21 +675,22 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
 			     LevelArray) == FAIL)
 	  ENZO_FAIL("Error in BHSeedBeginLevel.");
 
-      /* Solve the cooling and species rate equations. */
- 
+      /* Solve the cooling and species rate equations and run BH seeding
+         candidate pass before star formation. */
+
     for (grid1 = 0; grid1 < NumberOfGrids; grid1++) {
       Grids[grid1]->GridData->MultiSpeciesHandler();
 
       /* Update particle positions (if present). */
- 
+
       UpdateParticlePositions(Grids[grid1]->GridData);
 
     /*Trying after solving for radiative transfer */
 #ifdef EMISSIVITY
-    /*                                                                                                           
-        clear the Emissivity of the level below, after the level below                                            
+    /*
+        clear the Emissivity of the level below, after the level below
         updated the current level (it's parent) and before the next
-        timestep at the current level.                                                                            
+        timestep at the current level.
     */
       /*    if (StarMakerEmissivityField > 0) {
     LevelHierarchyEntry *Temp;
@@ -701,16 +702,22 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
       }*/
 #endif
 
-
       if (BHSeedingMethod)
-	if (Grids[grid1]->GridData->MBHMaker2Handler
-	    (Grids[grid1]->NextGridNextLevel, level, dtLevelAbove) == FAIL)
-	  ENZO_FAIL("Error in MBHMaker2Handler.");
+        if (Grids[grid1]->GridData->MBHMaker2Handler
+            (Grids[grid1]->NextGridNextLevel, level, dtLevelAbove) == FAIL)
+          ENZO_FAIL("Error in MBHMaker2Handler.");
+    }
+
+    if (BHSeedingMethod)
+      if (BHSeedFinalizeLevel() == FAIL)
+        ENZO_FAIL("Error in BHSeedFinalizeLevel.");
+
+    for (grid1 = 0; grid1 < NumberOfGrids; grid1++) {
 
       /* Include 'star' particle creation and feedback. */
 
       Grids[grid1]->GridData->StarParticleHandler
-	(Grids[grid1]->NextGridNextLevel, level ,dtLevelAbove, TopGridTimeStep);
+        (Grids[grid1]->NextGridNextLevel, level ,dtLevelAbove, TopGridTimeStep);
 
       Grids[grid1]->GridData->ActiveParticleHandler
         (Grids[grid1]->NextGridNextLevel, level ,dtLevelAbove,
@@ -722,63 +729,59 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
 
       /* Compute and apply thermal conduction. */
       if(IsotropicConduction || AnisotropicConduction){
-	if(Grids[grid1]->GridData->ConductHeat() == FAIL){
-	  ENZO_FAIL("Error in grid->ConductHeat.\n");
-	}
+        if(Grids[grid1]->GridData->ConductHeat() == FAIL){
+          ENZO_FAIL("Error in grid->ConductHeat.\n");
+        }
       }
 
       /* Compute and Apply Cosmic Ray Diffusion and Streaming*/
       if(CRModel){
-        if(CRDiffusion == 1){ // isotropic diffusion                                                                               
+        if(CRDiffusion == 1){ // isotropic diffusion
           if(Grids[grid1]->GridData->ComputeCRDiffusion() == FAIL){
             fprintf(stderr, "Error in grid->ComputeExplicitIsotropicCRDiffusion.\n");
             return FAIL;
           }
         }
-        else if(CRDiffusion == 2){ // anisotripic diffusion                                                                        
+        else if(CRDiffusion == 2){ // anisotripic diffusion
           if(Grids[grid1]->GridData->ComputeAnisotropicCRDiffusion() == FAIL){
             fprintf(stderr, "Error in grid->ComputeAnisotropicCRDiffusion .\n");
             return FAIL;
           }
         }
-        if(CRStreaming){ // cosmic ray streaming                                                                                   
+        if(CRStreaming){ // cosmic ray streaming
           if(Grids[grid1]->GridData->ComputeCRStreaming() == FAIL){
             fprintf(stderr, "Error in grid->ComputeCRStreaming .\n");
             return FAIL;
           }
         }
-      }// end CRModel if 
+      }// end CRModel if
 
       /* Gravity: clean up AccelerationField. */
 
 #ifndef SAB
       if ((level != MaximumGravityRefinementLevel ||
-	   MaximumGravityRefinementLevel == MaximumRefinementLevel) &&
-	  !PressureFree)
-	Grids[grid1]->GridData->DeleteAccelerationField();
+           MaximumGravityRefinementLevel == MaximumRefinementLevel) &&
+          !PressureFree)
+        Grids[grid1]->GridData->DeleteAccelerationField();
 #endif //!SAB
 
       Grids[grid1]->GridData->DeleteParticleAcceleration();
 
-      if (UseFloor) 
-	Grids[grid1]->GridData->SetFloor();
- 
-      /* Update current problem time of this subgrid. */
- 
-      Grids[grid1]->GridData->SetTimeNextTimestep();
- 
-      /* If using comoving co-ordinates, do the expansion terms now. */
- 
-      if (ComovingCoordinates)
-	Grids[grid1]->GridData->ComovingExpansionTerms();
- 
-      if (UseMagneticSupernovaFeedback)
-	Grids[grid1]->GridData->MagneticSupernovaList.clear(); 
-    } //end loop over grids
+      if (UseFloor)
+        Grids[grid1]->GridData->SetFloor();
 
-    if (BHSeedingMethod)
-      if (BHSeedFinalizeLevel() == FAIL)
-	ENZO_FAIL("Error in BHSeedFinalizeLevel.");
+      /* Update current problem time of this subgrid. */
+
+      Grids[grid1]->GridData->SetTimeNextTimestep();
+
+      /* If using comoving co-ordinates, do the expansion terms now. */
+
+      if (ComovingCoordinates)
+        Grids[grid1]->GridData->ComovingExpansionTerms();
+
+      if (UseMagneticSupernovaFeedback)
+        Grids[grid1]->GridData->MagneticSupernovaList.clear();
+    } //end loop over grids
 
     /* Finalize (accretion, feedback etc) for Active particles. */
     ActiveParticleFinalize(Grids, MetaData, NumberOfGrids, LevelArray,

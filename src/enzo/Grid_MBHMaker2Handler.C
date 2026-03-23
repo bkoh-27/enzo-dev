@@ -36,6 +36,7 @@ int mbh_maker2(grid *ThisGrid,
                int DensNum, int Vel1Num, int Vel2Num, int Vel3Num,
                float *temperature, float *cooling_time, float *dmfield,
                float *metal_fraction, int metal_field_present,
+               int dm_field_present,
                float CellWidthTemp,
                float DensityUnits, float LengthUnits, float TimeUnits,
                int MaximumRefinementLevel);
@@ -82,8 +83,9 @@ int grid::MBHMaker2Handler(HierarchyEntry* SubgridPointer, int level,
 
   float *dmfield = new float[size];
   int StartIndex[MAX_DIMENSION], Zero[] = {0, 0, 0};
-  if (level <= MaximumGravityRefinementLevel &&
-      GravitatingMassFieldParticles != NULL) {
+  int dm_field_present = (level <= MaximumGravityRefinementLevel &&
+                          GravitatingMassFieldParticles != NULL);
+  if (dm_field_present) {
     for (dim = 0; dim < MAX_DIMENSION; dim++)
       StartIndex[dim] =
         nint((CellLeftEdge[dim][0] - GravitatingMassFieldParticlesLeftEdge[dim])/
@@ -145,6 +147,7 @@ int grid::MBHMaker2Handler(HierarchyEntry* SubgridPointer, int level,
                           DensNum, Vel1Num, Vel2Num, Vel3Num,
                           temperature, cooling_time, dmfield,
                           metal_fraction, metal_field_present,
+                          dm_field_present,
                           CellWidthTemp,
                           DensityUnits, LengthUnits, TimeUnits,
                           MaximumRefinementLevel);
