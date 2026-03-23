@@ -984,7 +984,7 @@ int BHSeedFinalizeLevel()
       fprintf(logptr, "WARNING: large number of candidates reached kernel evaluation. Consider tightening gate thresholds.\n");
 
     if (global[12] > 0 && global[13] > (long long) (0.25 * double(global[12])))
-      fprintf(logptr, "WARNING: >25% of kernel evaluations were truncated at grid boundaries.\n");
+      fprintf(logptr, "WARNING: >25%% of kernel evaluations were truncated at grid boundaries.\n");
 
     fprintf(logptr,
             "[BHSEED] step=%d level=%d z=%.4f a_phys=%.6f "
