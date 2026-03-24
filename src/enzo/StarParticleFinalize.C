@@ -58,8 +58,12 @@ int StarParticleFinalize(HierarchyEntry *Grids[], TopGridData *MetaData,
 			 int &OutputNow)
 {
 
-  if (!StarParticleCreation && !StarParticleFeedback)
+  if (!StarParticleCreation && !StarParticleFeedback) {
+    if (BHSeedingMethod)
+      CommunicationUpdateStarParticleCount(Grids, MetaData, NumberOfGrids,
+                                           TotalStarParticleCountPrevious);
     return SUCCESS;
+  }
 
   int l, NumberOfStars;
   float TotalMass;

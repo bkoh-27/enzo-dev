@@ -39,9 +39,19 @@ int StarParticleInitialize(HierarchyEntry *Grids[], TopGridData *MetaData,
 			   int TotalStarParticleCountPrevious[])
 {
 
-  /* Return if this does not concern us */
-  if (!(StarParticleCreation || StarParticleFeedback)) 
+  /* Return if this does not concern us.
+     Phase 3 BH multi-seed can create MBH particles even when star creation
+     and star feedback are disabled, so we still need to prepare
+     TotalStarParticleCountPrevious for later particle-ID assignment. */
+  if (!(StarParticleCreation || StarParticleFeedback)) {
+    if (BHSeedingMethod) {
+      MetaData->NumberOfParticles = FindTotalNumberOfParticles(LevelArray);
+      NumberOfOtherParticles = MetaData->NumberOfParticles - NumberOfStarParticles;
+      RecordTotalStarParticleCount(Grids, NumberOfGrids,
+                                   TotalStarParticleCountPrevious);
+    }
     return SUCCESS;
+  }
 
   LCAPERF_START("StarParticleInitialize");
 
