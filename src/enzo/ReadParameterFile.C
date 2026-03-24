@@ -2186,6 +2186,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
       ENZO_FAIL("BHSeedOverdensityThreshold must be positive.");
     if (BHSeedLegacyCellMassGate != 0 && BHSeedLegacyCellMassGate != 1)
       ENZO_FAIL("BHSeedLegacyCellMassGate must be 0 (shadow) or 1 (hard gate).");
+    if (BHSeedMinEnclosedMass < BHSeedMass)
+      ENZO_FAIL("BHSeedMinEnclosedMass must be >= BHSeedMass. Fixed-mass seed requires guaranteed gas availability in the kernel.");
   }
 
   if (MyProcessorNumber == ROOT_PROCESSOR && BHSeedingMethod) {

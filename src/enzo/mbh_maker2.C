@@ -4,8 +4,8 @@
 /
 /  PURPOSE:
 /    Run BH candidate kernel, apply linked-cell distance exclusion,
-/    evaluate Phase 2 spherical kernel quantities, enforce deterministic
-/    winner selection across MPI ranks, and create one MBH.
+/    evaluate Phase 2 spherical kernel quantities, and pass all
+/    kernel-qualified candidates to the Phase 3 global gather path.
 /
 ************************************************************************/
 
@@ -27,6 +27,7 @@
 #include "StarParticleData.h"
 #include "CosmologyParameters.h"
 #include "phys_constants.h"
+#include "BHSeedCandidate.h"
 
 int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                        float *d, float *dm, float *temp, float *u, float *v, float *w,
@@ -35,7 +36,7 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                        float *odthresh, float *metalthresh, float *tempthresh,
                        int *veldivcrit, int *thermalcrit, int *selfboundcrit,
                        int *requirefinestlevel, int *requirelocalpeak,
-                       int *ncand, int *cand_index, float *cand_density,
+                       int *ncand, int *maxcand, int *cand_index, float *cand_density,
                        int *diag);
 
 int BHSeedIsActive();
@@ -47,17 +48,9 @@ void BHSeedAddKernelEvaluationDiagnostics(long long nevaluated,
                                           long long ntruncated,
                                           long long ngenclosedmass);
 void BHSeedNoteDMFieldAvailability(int available);
-int BHSeedCandidateBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos);
-void BHSeedAccumulateLocalBest(int has, float density,
-                               FLOAT xpos, FLOAT ypos, FLOAT zpos,
-                               int flat_index, grid *grid_ptr,
-                               int DensNum, int Vel1Num, int Vel2Num, int Vel3Num,
-                               float bh_mass_code, float cell_width_code,
-                               float patch_mass_msun,
-                               float patch_metallicity,
-                               float patch_density_peak,
-                               int kernel_complete,
-                               float host_dm_density);
+int BHSeedCandidateBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos, float dx_local);
+void BHSeedAddLocalCandidate(const BHSeedCandidate &cand);
+float BHSeedCurrentRedshift();
 
 struct BHSeedKernelEval {
   float patch_mass_msun;
@@ -173,15 +166,11 @@ int mbh_maker2(grid *ThisGrid,
   int nz = ThisGrid->GridDimension[2];
   int size = nx*ny*nz;
 
-  /* Not OpenMP-safe; safe because star formation/BH seeding grid loop is serial. */
-  static std::vector<int> cand_index_scratch;
-  static std::vector<float> cand_density_scratch;
-  if (int(cand_index_scratch.size()) < size) {
-    cand_index_scratch.resize(size);
-    cand_density_scratch.resize(size);
-  }
+  std::vector<int> cand_index_scratch(max(1, size));
+  std::vector<float> cand_density_scratch(max(1, size));
   int *cand_index = &cand_index_scratch[0];
   float *cand_density = &cand_density_scratch[0];
+  int maxcand_local = size;
   int diag[8];
   int ncand_local = 0;
   int ibuff = NumberOfGhostZones;
@@ -201,7 +190,7 @@ int mbh_maker2(grid *ThisGrid,
                          &BHSeedVelDivCrit, &BHSeedThermalCrit,
                          &BHSeedSelfBoundCrit,
                          &BHSeedRequireFinestLevel, &BHSeedRequireLocalPeak,
-                         &ncand_local, cand_index,
+                         &ncand_local, &maxcand_local, cand_index,
                          cand_density, diag) == FAIL) {
     return FAIL;
   }
@@ -220,16 +209,6 @@ int mbh_maker2(grid *ThisGrid,
   long long nkernel_evaluated = 0;
   long long nkernel_truncated = 0;
   long long enclosed_mass_gated = 0;
-
-  int local_has = FALSE;
-  int local_index = -1;
-  float local_density = -FLT_MAX;
-  FLOAT local_x = 0, local_y = 0, local_z = 0;
-  float local_patch_mass = -1.0f;
-  float local_patch_metallicity = -1.0f;
-  float local_patch_density_peak = -1.0f;
-  int local_kernel_complete = -1;
-  float local_host_dm_density = -1.0f;
 
   for (int c = 0; c < ncand_local; c++) {
     int index = cand_index[c];
@@ -252,7 +231,7 @@ int mbh_maker2(grid *ThisGrid,
       }
     }
 
-    if (BHSeedCandidateBlocked(xpos, ypos, zpos)) {
+    if (BHSeedCandidateBlocked(xpos, ypos, zpos, CellWidthTemp)) {
       dist_blocked++;
       continue;
     }
@@ -271,22 +250,29 @@ int mbh_maker2(grid *ThisGrid,
       continue;
     }
 
-    local_has = TRUE;
-    local_index = index;
-    local_density = cand_density[c];
-    local_x = xpos;
-    local_y = ypos;
-    local_z = zpos;
-    local_patch_mass = kernel.patch_mass_msun;
-    local_patch_metallicity = kernel.patch_metallicity;
+    BHSeedCandidate cand;
+    cand.pos[0] = xpos;
+    cand.pos[1] = ypos;
+    cand.pos[2] = zpos;
+    cand.patch_mass = kernel.patch_mass_msun;
     /* kernel maximum, not candidate-cell density */
-    local_patch_density_peak = kernel.patch_density_peak;
-    local_kernel_complete = kernel.kernel_complete;
-    if (dm_field_present && dmfield != NULL)
-      local_host_dm_density = dmfield[index];
-    else
-      local_host_dm_density = -1.0f;
-    break;
+    cand.patch_density_peak = kernel.patch_density_peak;
+    cand.patch_metallicity = kernel.patch_metallicity;
+    cand.kernel_complete = kernel.kernel_complete;
+    cand.host_dm_density =
+      (dm_field_present && dmfield != NULL) ? dmfield[index] : -1.0f;
+    cand.seed_redshift = BHSeedCurrentRedshift();
+    cand.seed_channel = BHSeedChannel;
+    cand.seed_mass_code_density = bh_mass_code;
+    cand.owning_rank = MyProcessorNumber;
+    cand.owning_grid_id = ThisGrid->GetGridID();
+    cand.cell_i = i;
+    cand.cell_j = j;
+    cand.cell_k = k;
+    cand.cell_index = index;
+    cand.dx_local = CellWidthTemp;
+    cand.accept_rank = -1;
+    BHSeedAddLocalCandidate(cand);
   }
 
   BHSeedAddDistBlocked(dist_blocked);
@@ -295,13 +281,6 @@ int mbh_maker2(grid *ThisGrid,
   BHSeedAddKernelEvaluationDiagnostics(nkernel_evaluated,
                                        nkernel_truncated,
                                        enclosed_mass_gated);
-  BHSeedAccumulateLocalBest(local_has, local_density, local_x, local_y, local_z,
-                            local_index, ThisGrid,
-                            DensNum, Vel1Num, Vel2Num, Vel3Num,
-                            bh_mass_code, CellWidthTemp,
-                            local_patch_mass, local_patch_metallicity,
-                            local_patch_density_peak, local_kernel_complete,
-                            local_host_dm_density);
 
   return SUCCESS;
 }

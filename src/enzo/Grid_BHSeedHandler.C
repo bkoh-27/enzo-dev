@@ -31,6 +31,7 @@
 #include "StarParticleData.h"
 #include "CosmologyParameters.h"
 #include "phys_constants.h"
+#include "BHSeedCandidate.h"
 
 int CosmologyComputeExpansionFactor(FLOAT time, FLOAT *a, FLOAT *dadt);
 int GetUnits(float *DensityUnits, float *LengthUnits,
@@ -100,6 +101,13 @@ struct BHSeedGlobalState {
   float LevelCellWidthCode;
   double SeedingWallStart;
   int PreCacheBH;
+  float HubbleParam;
+  float APhys;
+  float CandidateSeparationComKpcH;
+
+  std::vector<BHSeedCandidate> LocalCandidates;
+  std::vector<int> LocalGridIDs;
+  std::vector<grid*> LocalGridPtrs;
 };
 
 static BHSeedGlobalState BHSeedState;
@@ -149,6 +157,10 @@ static void BHSeedResetDiagnostics()
   BHSeedState.NewSeedsX.clear();
   BHSeedState.NewSeedsY.clear();
   BHSeedState.NewSeedsZ.clear();
+  BHSeedState.LocalCandidates.clear();
+  BHSeedState.LocalGridIDs.clear();
+  BHSeedState.LocalGridPtrs.clear();
+  BHSeedState.CandidateSeparationComKpcH = 0.0f;
   BHSeedState.BestLocalHas = FALSE;
   BHSeedState.BestLocalDensity = -FLT_MAX;
   BHSeedState.BestLocalX = 0;
@@ -298,18 +310,75 @@ static void BHSeedAppendGlobalBHUnique(FLOAT x, FLOAT y, FLOAT z)
   BHSeedAppendGlobalBH(x, y, z);
 }
 
-static int BHSeedPositionBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos)
+static float BHSeedPeriodicDistance2ComKpcH(FLOAT x1, FLOAT y1, FLOAT z1,
+                                             FLOAT x2, FLOAT y2, FLOAT z2)
 {
-  if (BHSeedState.CellSizeCode <= 0.0f || BHSeedState.X.empty())
+  float dx = x1 - x2;
+  float dy = y1 - y2;
+  float dz = z1 - z2;
+
+  if (dx >  0.5f*BHSeedState.DomainWidth[0]) dx -= BHSeedState.DomainWidth[0];
+  if (dx < -0.5f*BHSeedState.DomainWidth[0]) dx += BHSeedState.DomainWidth[0];
+  if (dy >  0.5f*BHSeedState.DomainWidth[1]) dy -= BHSeedState.DomainWidth[1];
+  if (dy < -0.5f*BHSeedState.DomainWidth[1]) dy += BHSeedState.DomainWidth[1];
+  if (dz >  0.5f*BHSeedState.DomainWidth[2]) dz -= BHSeedState.DomainWidth[2];
+  if (dz < -0.5f*BHSeedState.DomainWidth[2]) dz += BHSeedState.DomainWidth[2];
+
+  dx *= BHSeedState.BoxKpcH;
+  dy *= BHSeedState.BoxKpcH;
+  dz *= BHSeedState.BoxKpcH;
+
+  return dx*dx + dy*dy + dz*dz;
+}
+
+static float BHSeedExclusionRadiusComKpcHForCandidate(float dx_local)
+{
+  float radius_com = 0.0f;
+
+  if (BHSeedExclusionMode == 1) {
+    /* Mode 1: parameter is already comoving kpc/h. */
+    radius_com = BHSeedExclusionRadius;
+  } else if (BHSeedExclusionMode == 2) {
+    /* Mode 2: candidate-centric resolution-scaled exclusion radius. */
+    radius_com = BHSeedExclusionCells * dx_local * BHSeedState.BoxKpcH;
+  } else {
+    /* Mode 0: fixed physical kpc converted to comoving kpc/h in BeginLevel. */
+    radius_com = BHSeedState.ExclusionRadiusComKpcH;
+  }
+
+  if (radius_com < 0.0f)
+    radius_com = 0.0f;
+
+  return radius_com;
+}
+
+static int BHSeedPositionBlockedWithRadius(FLOAT xpos, FLOAT ypos, FLOAT zpos,
+                                           float radius_com_kpch)
+{
+  if (radius_com_kpch <= 0.0f || BHSeedState.X.empty())
     return FALSE;
+
+  const float radius2 = radius_com_kpch * radius_com_kpch;
 
   const float max_periodic_dist2 =
     0.25f * BHSeedState.BoxKpcH * BHSeedState.BoxKpcH *
     (BHSeedState.DomainWidth[0]*BHSeedState.DomainWidth[0] +
      BHSeedState.DomainWidth[1]*BHSeedState.DomainWidth[1] +
      BHSeedState.DomainWidth[2]*BHSeedState.DomainWidth[2]);
-  if (BHSeedState.ExclusionRadius2 >= max_periodic_dist2)
+  if (radius2 >= max_periodic_dist2)
     return TRUE;
+
+  if (BHSeedState.CellSizeCode <= 0.0f || BHSeedState.Head.empty()) {
+    for (int n = 0; n < int(BHSeedState.X.size()); n++) {
+      float dist2 = BHSeedPeriodicDistance2ComKpcH(xpos, ypos, zpos,
+                                                   BHSeedState.X[n],
+                                                   BHSeedState.Y[n],
+                                                   BHSeedState.Z[n]);
+      if (dist2 < radius2)
+        return TRUE;
+    }
+    return FALSE;
+  }
 
   int bi = BHSeedBin1D(xpos, BHSeedState.DomainLeft[0], BHSeedState.DomainWidth[0],
                        BHSeedState.CellSizeCode, BHSeedState.NBins[0]);
@@ -318,32 +387,25 @@ static int BHSeedPositionBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos)
   int bk = BHSeedBin1D(zpos, BHSeedState.DomainLeft[2], BHSeedState.DomainWidth[2],
                        BHSeedState.CellSizeCode, BHSeedState.NBins[2]);
 
-  for (int dk = -1; dk <= 1; dk++)
-    for (int dj = -1; dj <= 1; dj++)
-      for (int di = -1; di <= 1; di++) {
+  const float bin_width_kpch = BHSeedState.CellSizeCode * BHSeedState.BoxKpcH;
+  int nsearch = 0;
+  if (bin_width_kpch > 0.0f)
+    nsearch = int(ceil(radius_com_kpch / bin_width_kpch));
+
+  for (int dk = -nsearch; dk <= nsearch; dk++)
+    for (int dj = -nsearch; dj <= nsearch; dj++)
+      for (int di = -nsearch; di <= nsearch; di++) {
         int nbi = BHSeedWrapBin(bi + di, BHSeedState.NBins[0]);
         int nbj = BHSeedWrapBin(bj + dj, BHSeedState.NBins[1]);
         int nbk = BHSeedWrapBin(bk + dk, BHSeedState.NBins[2]);
         int bin = (nbk*BHSeedState.NBins[1] + nbj)*BHSeedState.NBins[0] + nbi;
 
         for (int n = BHSeedState.Head[bin]; n >= 0; n = BHSeedState.Next[n]) {
-          float dx = xpos - BHSeedState.X[n];
-          float dy = ypos - BHSeedState.Y[n];
-          float dz = zpos - BHSeedState.Z[n];
-
-          if (dx >  0.5f*BHSeedState.DomainWidth[0]) dx -= BHSeedState.DomainWidth[0];
-          if (dx < -0.5f*BHSeedState.DomainWidth[0]) dx += BHSeedState.DomainWidth[0];
-          if (dy >  0.5f*BHSeedState.DomainWidth[1]) dy -= BHSeedState.DomainWidth[1];
-          if (dy < -0.5f*BHSeedState.DomainWidth[1]) dy += BHSeedState.DomainWidth[1];
-          if (dz >  0.5f*BHSeedState.DomainWidth[2]) dz -= BHSeedState.DomainWidth[2];
-          if (dz < -0.5f*BHSeedState.DomainWidth[2]) dz += BHSeedState.DomainWidth[2];
-
-          dx *= BHSeedState.BoxKpcH;
-          dy *= BHSeedState.BoxKpcH;
-          dz *= BHSeedState.BoxKpcH;
-
-          float dist2 = dx*dx + dy*dy + dz*dz;
-          if (dist2 < BHSeedState.ExclusionRadius2)
+          float dist2 = BHSeedPeriodicDistance2ComKpcH(xpos, ypos, zpos,
+                                                       BHSeedState.X[n],
+                                                       BHSeedState.Y[n],
+                                                       BHSeedState.Z[n]);
+          if (dist2 < radius2)
             return TRUE;
         }
       }
@@ -357,6 +419,51 @@ struct BHSeedSortOrder {
   bool operator()(int ia, int ib) const
   {
     return (*ID)[ia] < (*ID)[ib];
+  }
+};
+
+struct BHSeedCandidateComparator {
+  int RankingOrder;
+  int UseDeterministicTiebreak;
+
+  bool operator()(const BHSeedCandidate &a, const BHSeedCandidate &b) const
+  {
+    if (RankingOrder == 1) {
+      if (a.patch_density_peak != b.patch_density_peak)
+        return a.patch_density_peak > b.patch_density_peak;
+      if (a.patch_mass != b.patch_mass)
+        return a.patch_mass > b.patch_mass;
+    } else {
+      if (a.patch_mass != b.patch_mass)
+        return a.patch_mass > b.patch_mass;
+      if (a.patch_density_peak != b.patch_density_peak)
+        return a.patch_density_peak > b.patch_density_peak;
+    }
+
+    if (a.patch_metallicity != b.patch_metallicity)
+      return a.patch_metallicity < b.patch_metallicity;
+
+    if (UseDeterministicTiebreak) {
+      if (a.pos[0] != b.pos[0])
+        return a.pos[0] < b.pos[0];
+      if (a.pos[1] != b.pos[1])
+        return a.pos[1] < b.pos[1];
+      if (a.pos[2] != b.pos[2])
+        return a.pos[2] < b.pos[2];
+    }
+
+    if (a.owning_rank != b.owning_rank)
+      return a.owning_rank < b.owning_rank;
+    if (a.owning_grid_id != b.owning_grid_id)
+      return a.owning_grid_id < b.owning_grid_id;
+    if (a.cell_k != b.cell_k)
+      return a.cell_k < b.cell_k;
+    if (a.cell_j != b.cell_j)
+      return a.cell_j < b.cell_j;
+    if (a.cell_i != b.cell_i)
+      return a.cell_i < b.cell_i;
+
+    return a.cell_index < b.cell_index;
   }
 };
 
@@ -402,9 +509,20 @@ void BHSeedNoteDMFieldAvailability(int available)
     BHSeedState.DMFieldAvailableLocal = TRUE;
 }
 
-int BHSeedCandidateBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos)
+float BHSeedCurrentRedshift()
 {
-  return BHSeedPositionBlocked(xpos, ypos, zpos);
+  return BHSeedState.Zred;
+}
+
+void BHSeedAddLocalCandidate(const BHSeedCandidate &cand)
+{
+  BHSeedState.LocalCandidates.push_back(cand);
+}
+
+int BHSeedCandidateBlocked(FLOAT xpos, FLOAT ypos, FLOAT zpos, float dx_local)
+{
+  const float radius_com = BHSeedExclusionRadiusComKpcHForCandidate(dx_local);
+  return BHSeedPositionBlockedWithRadius(xpos, ypos, zpos, radius_com);
 }
 
 void BHSeedAccumulateLocalBest(int has, float density,
@@ -625,6 +743,416 @@ int BHSeedCreateLocalBestParticle()
   return SUCCESS;
 }
 
+static grid* BHSeedFindLocalGridByID(int grid_id)
+{
+  for (int n = 0; n < int(BHSeedState.LocalGridIDs.size()); n++)
+    if (BHSeedState.LocalGridIDs[n] == grid_id)
+      return BHSeedState.LocalGridPtrs[n];
+  return NULL;
+}
+
+int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
+                                         long long *nskipped_insufficient_gas)
+{
+  if (cand.owning_rank != MyProcessorNumber)
+    return SUCCESS;
+
+  grid *GridData = BHSeedFindLocalGridByID(cand.owning_grid_id);
+  if (GridData == NULL)
+    ENZO_FAIL("BHSeedCreateAcceptedCandidate: owning grid not found on owning rank.");
+
+  int DensNum, GENum, TENum, Vel1Num, Vel2Num, Vel3Num, B1Num, B2Num, B3Num;
+  if (GridData->IdentifyPhysicalQuantities(DensNum, GENum, Vel1Num, Vel2Num,
+                                           Vel3Num, TENum, B1Num, B2Num, B3Num) == FAIL)
+    ENZO_FAIL("Error in IdentifyPhysicalQuantities.");
+
+  const int nx = GridData->GridDimension[0];
+  const int ny = GridData->GridDimension[1];
+  const int nz = GridData->GridDimension[2];
+  const int xo = 1;
+  const int yo = nx;
+  const int zo = nx*ny;
+
+  const int i0 = cand.cell_i;
+  const int j0 = cand.cell_j;
+  const int k0 = cand.cell_k;
+  const int index0 = cand.cell_index;
+  const float cell_width = cand.dx_local;
+  const double cell_volume_code = pow(cell_width, 3.0);
+  const double bh_mass_code = double(cand.seed_mass_code_density) * cell_volume_code;
+
+  if (bh_mass_code <= 0.0) {
+    (*nskipped_insufficient_gas)++;
+    return SUCCESS;
+  }
+
+  const int isx = GridData->GetGridStartIndex(0);
+  const int isy = GridData->GetGridStartIndex(1);
+  const int isz = GridData->GetGridStartIndex(2);
+  const int iex = GridData->GetGridEndIndex(0);
+  const int iey = GridData->GetGridEndIndex(1);
+  const int iez = GridData->GetGridEndIndex(2);
+
+  const int rcell = max(0, int(ceil(BHSeedPatchRadius / cell_width)));
+  const int ilo = max(0, i0 - rcell);
+  const int ihi = min(nx - 1, i0 + rcell);
+  const int jlo = max(0, j0 - rcell);
+  const int jhi = min(ny - 1, j0 + rcell);
+  const int klo = max(0, k0 - rcell);
+  const int khi = min(nz - 1, k0 + rcell);
+  const double r2 = double(BHSeedPatchRadius) * double(BHSeedPatchRadius);
+
+  std::vector<int> active_index;
+  std::vector<double> active_mass;
+  std::vector<double> active_velx;
+  std::vector<double> active_vely;
+  std::vector<double> active_velz;
+  active_index.reserve((2*rcell+1)*(2*rcell+1)*(2*rcell+1));
+  active_mass.reserve((2*rcell+1)*(2*rcell+1)*(2*rcell+1));
+  active_velx.reserve((2*rcell+1)*(2*rcell+1)*(2*rcell+1));
+  active_vely.reserve((2*rcell+1)*(2*rcell+1)*(2*rcell+1));
+  active_velz.reserve((2*rcell+1)*(2*rcell+1)*(2*rcell+1));
+
+  double active_zone_mass = 0.0;
+
+  /* Deterministic k-j-i loop order for MPI reproducibility. */
+  for (int k = klo; k <= khi; k++) {
+    const double dz = (double(k - k0)) * double(cell_width);
+    for (int j = jlo; j <= jhi; j++) {
+      const double dy = (double(j - j0)) * double(cell_width);
+      for (int i = ilo; i <= ihi; i++) {
+        const double dx = (double(i - i0)) * double(cell_width);
+        const double dist2 = dx*dx + dy*dy + dz*dz;
+        if (dist2 > r2)
+          continue;
+
+        if (i < isx || i > iex || j < isy || j > iey || k < isz || k > iez)
+          continue;
+
+        const int nindex = (k*ny + j)*nx + i;
+        const double rho = GridData->BaryonField[DensNum][nindex];
+        if (rho <= 0.0)
+          continue;
+
+        const double mcell = rho * cell_volume_code;
+        if (mcell <= 0.0)
+          continue;
+
+        double vx = 0.0, vy = 0.0, vz = 0.0;
+        if (HydroMethod == Zeus_Hydro) {
+          vx = 0.5*(GridData->BaryonField[Vel1Num][nindex] +
+                    GridData->BaryonField[Vel1Num][nindex+xo]);
+          vy = 0.5*(GridData->BaryonField[Vel2Num][nindex] +
+                    GridData->BaryonField[Vel2Num][nindex+yo]);
+          vz = 0.5*(GridData->BaryonField[Vel3Num][nindex] +
+                    GridData->BaryonField[Vel3Num][nindex+zo]);
+        } else {
+          vx = GridData->BaryonField[Vel1Num][nindex];
+          vy = GridData->BaryonField[Vel2Num][nindex];
+          vz = GridData->BaryonField[Vel3Num][nindex];
+        }
+
+        active_index.push_back(nindex);
+        active_mass.push_back(mcell);
+        active_velx.push_back(vx);
+        active_vely.push_back(vy);
+        active_velz.push_back(vz);
+        active_zone_mass += mcell;
+      }
+    }
+  }
+
+  if (active_zone_mass < bh_mass_code || active_index.empty()) {
+    (*nskipped_insufficient_gas)++;
+    return SUCCESS;
+  }
+
+  const float seed_density_before = GridData->BaryonField[DensNum][index0];
+
+  std::vector<double> dm_removed(active_index.size(), 0.0);
+
+  double removed_mass = 0.0;
+  double momentum_x = 0.0;
+  double momentum_y = 0.0;
+  double momentum_z = 0.0;
+  int removed_cells = 0;
+  double min_rho_after = DBL_MAX;
+  double max_remove_fraction = 0.0;
+  double remaining_to_remove = bh_mass_code;
+  double remaining_available = active_zone_mass;
+
+  for (int n = 0; n < int(active_index.size()); n++) {
+    const double mcell = active_mass[n];
+
+    double dm = 0.0;
+    if (n == int(active_index.size()) - 1)
+      dm = remaining_to_remove;
+    else if (remaining_available > 0.0)
+      dm = remaining_to_remove * (mcell / remaining_available);
+
+    dm = max(0.0, dm);
+    dm = min(dm, mcell);
+
+    dm_removed[n] = dm;
+    remaining_to_remove -= dm;
+    remaining_available -= mcell;
+  }
+
+  if (remaining_to_remove != 0.0) {
+    if (remaining_to_remove > 0.0) {
+      for (int n = int(active_index.size()) - 1;
+           n >= 0 && remaining_to_remove > 0.0; n--) {
+        const double cap = active_mass[n] - dm_removed[n];
+        if (cap <= 0.0)
+          continue;
+        const double add = min(cap, remaining_to_remove);
+        dm_removed[n] += add;
+        remaining_to_remove -= add;
+      }
+    } else {
+      for (int n = int(active_index.size()) - 1;
+           n >= 0 && remaining_to_remove < 0.0; n--) {
+        if (dm_removed[n] <= 0.0)
+          continue;
+        const double sub = min(dm_removed[n], -remaining_to_remove);
+        dm_removed[n] -= sub;
+        remaining_to_remove += sub;
+      }
+    }
+  }
+
+  for (int n = 0; n < int(active_index.size()); n++) {
+    const int nindex = active_index[n];
+    const double dm = dm_removed[n];
+    if (dm <= 0.0)
+      continue;
+
+    const double rho_old = GridData->BaryonField[DensNum][nindex];
+    const double mold = rho_old * cell_volume_code;
+    const double mnew = max(0.0, mold - dm);
+    double rho_new = mnew / cell_volume_code;
+    if (rho_new < 0.0)
+      rho_new = 0.0;
+
+    removed_cells++;
+    min_rho_after = min(min_rho_after, rho_new);
+    if (mold > 0.0)
+      max_remove_fraction = max(max_remove_fraction, dm / mold);
+
+    if (HydroMethod == PPM_DirectEuler) {
+      if (mold > 0.0 && mnew > 0.0) {
+        const double vx = active_velx[n];
+        const double vy = active_vely[n];
+        const double vz = active_velz[n];
+        const double v2 = vx*vx + vy*vy + vz*vz;
+
+        const double etot = mold * GridData->BaryonField[TENum][nindex];
+        double eint = 0.0;
+        if (GENum >= 0 && DualEnergyFormalism)
+          eint = mold * GridData->BaryonField[GENum][nindex];
+        else
+          eint = etot - 0.5*mold*v2;
+
+        const double ke = 0.5*mold*v2;
+        const double frac = mnew / mold;
+        const double eint_new = eint * frac;
+        const double ke_new = ke * frac;
+        const double etot_new = eint_new + ke_new;
+        GridData->BaryonField[TENum][nindex] = float(etot_new / mnew);
+      }
+    } else if (HydroMethod == Zeus_Hydro) {
+      // Total energy is internal specific energy for Zeus; unchanged.
+      ;
+    } else {
+      ENZO_FAIL("BHSeed kernel removal does not support RK Hydro or RK MHD.");
+    }
+
+    GridData->BaryonField[DensNum][nindex] = float(rho_new);
+
+    removed_mass += dm;
+    momentum_x += dm * active_velx[n];
+    momentum_y += dm * active_vely[n];
+    momentum_z += dm * active_velz[n];
+  }
+
+  const double rel_mass_err =
+    (bh_mass_code > 0.0) ? fabs(removed_mass - bh_mass_code) / bh_mass_code : 0.0;
+
+  ParticleEntry p;
+  p.Position[0] = cand.pos[0];
+  p.Position[1] = cand.pos[1];
+  p.Position[2] = cand.pos[2];
+  p.Velocity[0] = (bh_mass_code > 0.0) ? float(momentum_x / bh_mass_code) : 0.0f;
+  p.Velocity[1] = (bh_mass_code > 0.0) ? float(momentum_y / bh_mass_code) : 0.0f;
+  p.Velocity[2] = (bh_mass_code > 0.0) ? float(momentum_z / bh_mass_code) : 0.0f;
+
+  for (int n = 0; n < MAX_NUMBER_OF_PARTICLE_ATTRIBUTES; n++)
+    p.Attribute[n] = 0.0f;
+
+  p.Type = PARTICLE_TYPE_MBH;
+  p.Number = INT_UNDEFINED;
+  p.Mass = bh_mass_code;
+
+  if (BHSeedVerbose >= 2) {
+    const double mom_x_particle = double(p.Mass) * double(p.Velocity[0]);
+    const double mom_y_particle = double(p.Mass) * double(p.Velocity[1]);
+    const double mom_z_particle = double(p.Mass) * double(p.Velocity[2]);
+    const double rel_mom_x_err =
+      (fabs(momentum_x) > 0.0) ? fabs(momentum_x - mom_x_particle) / fabs(momentum_x) : 0.0;
+    const double rel_mom_y_err =
+      (fabs(momentum_y) > 0.0) ? fabs(momentum_y - mom_y_particle) / fabs(momentum_y) : 0.0;
+    const double rel_mom_z_err =
+      (fabs(momentum_z) > 0.0) ? fabs(momentum_z - mom_z_particle) / fabs(momentum_z) : 0.0;
+    FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    if (removed_cells == 0)
+      min_rho_after = -1.0;
+    fprintf(logptr,
+            "[BHSEED_DEBUG] active_zone_mass_code=%.15e sum_dm_removed=%.15e "
+            "bh_mass_code=%.15e p_mass_code=%.15e rel_mass_err=%.3e "
+            "mom_x_removed=%.15e mom_y_removed=%.15e mom_z_removed=%.15e "
+            "mom_x_particle=%.15e mom_y_particle=%.15e mom_z_particle=%.15e "
+            "rel_mom_x_err=%.3e rel_mom_y_err=%.3e rel_mom_z_err=%.3e "
+            "removed_cells=%d min_rho_after=%.15e max_remove_fraction=%.15e\n",
+            active_zone_mass, removed_mass, bh_mass_code, double(p.Mass), rel_mass_err,
+            momentum_x, momentum_y, momentum_z,
+            mom_x_particle, mom_y_particle, mom_z_particle,
+            rel_mom_x_err, rel_mom_y_err, rel_mom_z_err,
+            removed_cells, min_rho_after, max_remove_fraction);
+  }
+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_CREATION_TIME)
+    p.Attribute[PARTICLE_ATTRIBUTE_CREATION_TIME] = GridData->Time;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_DYNAMICAL_TIME)
+    p.Attribute[PARTICLE_ATTRIBUTE_DYNAMICAL_TIME] = 0.0f;
+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_METALLICITY_FRACTION) {
+    float metal_fraction = 0.0f;
+    int SNColourNum, MetalNum, MBHColourNum, Galaxy1ColourNum, Galaxy2ColourNum;
+    int MetalIaNum, MetalIINum;
+    if (GridData->IdentifyColourFields(SNColourNum, MetalNum, MetalIaNum, MetalIINum,
+                                       MBHColourNum, Galaxy1ColourNum, Galaxy2ColourNum)
+        != FAIL) {
+      float den = seed_density_before;
+      if (den > 0.0f) {
+        if (MetalNum != -1 && SNColourNum != -1)
+          metal_fraction = (GridData->BaryonField[MetalNum][index0] +
+                            GridData->BaryonField[SNColourNum][index0]) / den;
+        else if (MetalNum != -1)
+          metal_fraction = GridData->BaryonField[MetalNum][index0] / den;
+        else if (SNColourNum != -1)
+          metal_fraction = GridData->BaryonField[SNColourNum][index0] / den;
+      }
+    }
+    p.Attribute[PARTICLE_ATTRIBUTE_METALLICITY_FRACTION] = metal_fraction;
+  }
+
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_CHANNEL)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_CHANNEL] = float(cand.seed_channel);
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT] = cand.seed_redshift;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_MASS] = cand.patch_mass;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_METALLICITY] = cand.patch_metallicity;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK] = cand.patch_density_peak;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE] = float(cand.kernel_complete);
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY] = cand.host_dm_density;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = float(cand.accept_rank);
+
+  if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
+    return FAIL;
+
+  BHSeedRecordCreatedSeed(cand.pos[0], cand.pos[1], cand.pos[2]);
+  if (GridData->BaryonField[GridData->NumberOfBaryonFields] != NULL)
+    GridData->BaryonField[GridData->NumberOfBaryonFields][index0] = 1.0f;
+
+  if (BHSeedVerbose >= 1) {
+    FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    fprintf(logptr,
+            "[BHSEED_SEED] level=%d x=%.8g y=%.8g z=%.8g channel=%d redshift=%.8g "
+            "patch_mass=%.8g patch_metal=%.8g patch_density_peak=%.8g "
+            "kernel_complete=%d host_dm_density=%.8g accept_rank=%d\n",
+            BHSeedState.Level,
+            cand.pos[0], cand.pos[1], cand.pos[2], cand.seed_channel,
+            cand.seed_redshift, cand.patch_mass, cand.patch_metallicity,
+            cand.patch_density_peak, cand.kernel_complete, cand.host_dm_density,
+            cand.accept_rank);
+  }
+
+  return SUCCESS;
+}
+
+static int BHSeedSyncCreatedSeedsToGlobalCache()
+{
+  int local_n = int(BHSeedState.NewSeedsX.size());
+  Eint32 local_n32 = Eint32(local_n);
+  Eint32 any32 = local_n32;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Allreduce(&local_n32, &any32, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+#endif
+  if (any32 == 0)
+    return SUCCESS;
+
+
+  std::vector<FLOAT> local_xyz(3*local_n);
+  for (int n = 0; n < local_n; n++) {
+    local_xyz[3*n + 0] = BHSeedState.NewSeedsX[n];
+    local_xyz[3*n + 1] = BHSeedState.NewSeedsY[n];
+    local_xyz[3*n + 2] = BHSeedState.NewSeedsZ[n];
+  }
+
+  int global_n = local_n;
+  std::vector<Eint32> counts, displs;
+  std::vector<Eint32> counts3, displs3;
+
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1) {
+    counts.assign(NumberOfProcessors, 0);
+    displs.assign(NumberOfProcessors, 0);
+
+    MPI_Allgather(&local_n32, 1, MPI_INT, &counts[0], 1, MPI_INT, MPI_COMM_WORLD);
+
+    global_n = 0;
+    for (int p = 0; p < NumberOfProcessors; p++) {
+      displs[p] = global_n;
+      global_n += counts[p];
+    }
+
+    counts3.assign(NumberOfProcessors, 0);
+    displs3.assign(NumberOfProcessors, 0);
+    for (int p = 0; p < NumberOfProcessors; p++) {
+      counts3[p] = 3 * counts[p];
+      displs3[p] = 3 * displs[p];
+    }
+
+    std::vector<FLOAT> global_xyz(3*global_n, 0.0f);
+    MPI_Allgatherv((local_n > 0) ? &local_xyz[0] : NULL, 3*local_n,
+                   FLOATDataType,
+                   (global_n > 0) ? &global_xyz[0] : NULL,
+                   &counts3[0], &displs3[0], FLOATDataType,
+                   MPI_COMM_WORLD);
+
+    for (int n = 0; n < global_n; n++)
+      BHSeedAppendGlobalBHUnique(global_xyz[3*n + 0],
+                                 global_xyz[3*n + 1],
+                                 global_xyz[3*n + 2]);
+  } else
+#endif
+  {
+    for (int n = 0; n < local_n; n++)
+      BHSeedAppendGlobalBHUnique(local_xyz[3*n + 0],
+                                 local_xyz[3*n + 1],
+                                 local_xyz[3*n + 2]);
+  }
+
+  return SUCCESS;
+}
+
 int BHSeedBeginLevel(HierarchyEntry *Grids[], int NumberOfGrids, int level, FLOAT time,
                      LevelHierarchyEntry *LevelArray[])
 {
@@ -651,11 +1179,15 @@ int BHSeedBeginLevel(HierarchyEntry *Grids[], int NumberOfGrids, int level, FLOA
   BHSeedState.LevelCellWidthCode = 0.0f;
 
   double local_dx = 1.0e99;
+  BHSeedState.LocalGridIDs.reserve(NumberOfGrids);
+  BHSeedState.LocalGridPtrs.reserve(NumberOfGrids);
   for (int g = 0; g < NumberOfGrids; g++) {
     grid *GridData = Grids[g]->GridData;
     if (GridData->ReturnProcessorNumber() != MyProcessorNumber)
       continue;
     local_dx = min(local_dx, double(GridData->GetCellWidth(0, 0)));
+    BHSeedState.LocalGridIDs.push_back(GridData->GetGridID());
+    BHSeedState.LocalGridPtrs.push_back(GridData);
   }
 
   double global_dx = local_dx;
@@ -706,12 +1238,29 @@ int BHSeedBeginLevel(HierarchyEntry *Grids[], int NumberOfGrids, int level, FLOA
       a_param = 1.0f;
   }
 
-  BHSeedState.ExclusionRadiusComKpcH = BHSeedExclusionRadius * h_param / a_param;
-  BHSeedState.ExclusionRadius2 = BHSeedState.ExclusionRadiusComKpcH *
-                                 BHSeedState.ExclusionRadiusComKpcH;
+  BHSeedState.HubbleParam = h_param;
+  BHSeedState.APhys = a_param;
+
+  BHSeedState.CandidateSeparationComKpcH =
+    BHSeedMinCandidateSeparation * h_param / a_param;
+
+  float representative_excl_com = 0.0f;
+  if (BHSeedExclusionMode == 1) {
+    representative_excl_com = BHSeedExclusionRadius;
+  } else if (BHSeedExclusionMode == 2) {
+    representative_excl_com =
+      BHSeedExclusionCells * BHSeedState.LevelCellWidthCode * BHSeedState.BoxKpcH;
+  } else {
+    representative_excl_com = BHSeedExclusionRadius * h_param / a_param;
+  }
+  if (representative_excl_com < 0.0f)
+    representative_excl_com = 0.0f;
+
+  BHSeedState.ExclusionRadiusComKpcH = representative_excl_com;
+  BHSeedState.ExclusionRadius2 = representative_excl_com * representative_excl_com;
   BHSeedState.CellSizeCode = 0.0f;
-  if (BHSeedState.ExclusionRadiusComKpcH > 0.0f && BHSeedState.BoxKpcH > 0.0f)
-    BHSeedState.CellSizeCode = 0.5f * BHSeedState.ExclusionRadiusComKpcH /
+  if (representative_excl_com > 0.0f && BHSeedState.BoxKpcH > 0.0f)
+    BHSeedState.CellSizeCode = 0.5f * representative_excl_com /
                                BHSeedState.BoxKpcH;
 
   if (level == 0 && !BHSeedCacheInitialized) {
@@ -839,78 +1388,133 @@ int BHSeedFinalizeLevel()
   if (!BHSeedingMethod || !BHSeedState.Active)
     return SUCCESS;
 
-  double local5[5];
-  if (BHSeedState.BestLocalHas) {
-    local5[0] = BHSeedState.BestLocalDensity;
-    local5[1] = BHSeedState.BestLocalX;
-    local5[2] = BHSeedState.BestLocalY;
-    local5[3] = BHSeedState.BestLocalZ;
-    local5[4] = MyProcessorNumber;
-  } else {
-    local5[0] = -DBL_MAX;
-    local5[1] = DBL_MAX;
-    local5[2] = DBL_MAX;
-    local5[3] = DBL_MAX;
-    local5[4] = MyProcessorNumber;
-  }
+  const int packed_bytes = BHSeedCandidatePackedBytes();
+  const int expected_packed_bytes =
+    3*int(sizeof(double)) + 7*int(sizeof(float)) + 9*int(sizeof(int));
+  if (packed_bytes != expected_packed_bytes)
+    ENZO_FAIL("BHSeedCandidate packed size mismatch.");
 
-  double best_density = local5[0];
-  double best_x = local5[1];
-  double best_y = local5[2];
-  double best_z = local5[3];
-  Eint32 best_rank = Eint32(local5[4]);
+  const int local_count = int(BHSeedState.LocalCandidates.size());
+  int global_count = local_count;
+
+  std::vector<BHSeedCandidate> gathered;
 
 #ifdef USE_MPI
+  std::vector<Eint32> counts;
   if (NumberOfProcessors > 1) {
-    std::vector<double> all5(5*NumberOfProcessors, 0.0);
-    MPI_Allgather(local5, 5, MPI_DOUBLE, &all5[0], 5, MPI_DOUBLE, MPI_COMM_WORLD);
+    counts.assign(NumberOfProcessors, 0);
+    Eint32 local_count32 = Eint32(local_count);
+    MPI_Allgather((void*) &local_count32, 1, MPI_INT,
+                  (void*) &counts[0], 1, MPI_INT, MPI_COMM_WORLD);
 
-    best_density = -DBL_MAX;
-    best_x = DBL_MAX;
-    best_y = DBL_MAX;
-    best_z = DBL_MAX;
-    best_rank = ROOT_PROCESSOR;
+    global_count = 0;
+    for (int p = 0; p < NumberOfProcessors; p++)
+      global_count += counts[p];
 
-    for (int p = 0; p < NumberOfProcessors; p++) {
-      double d = all5[5*p + 0];
-      double x = all5[5*p + 1];
-      double y = all5[5*p + 2];
-      double z = all5[5*p + 3];
-      Eint32 r = Eint32(all5[5*p + 4]);
+    if (global_count > 0) {
+      std::vector<Eint32> byte_counts(NumberOfProcessors, 0);
+      std::vector<Eint32> byte_displs(NumberOfProcessors, 0);
+      int total_bytes = 0;
+      for (int p = 0; p < NumberOfProcessors; p++) {
+        byte_counts[p] = counts[p] * packed_bytes;
+        byte_displs[p] = total_bytes;
+        total_bytes += byte_counts[p];
+      }
 
-      if (d > best_density ||
-          (d == best_density &&
-           (x < best_x ||
-            (x == best_x && y < best_y) ||
-            (x == best_x && y == best_y && z < best_z) ||
-            (x == best_x && y == best_y && z == best_z && r < best_rank)))) {
-        best_density = d;
-        best_x = x;
-        best_y = y;
-        best_z = z;
-        best_rank = r;
+      std::vector<char> send_buffer(local_count * packed_bytes);
+      for (int n = 0; n < local_count; n++)
+        BHSeedCandidatePack(BHSeedState.LocalCandidates[n],
+                            &send_buffer[n*packed_bytes]);
+
+      std::vector<char> recv_buffer(total_bytes);
+      MPI_Allgatherv((local_count > 0) ? &send_buffer[0] : NULL,
+                     local_count * packed_bytes, MPI_PACKED,
+                     (total_bytes > 0) ? &recv_buffer[0] : NULL,
+                     &byte_counts[0], &byte_displs[0], MPI_PACKED,
+                     MPI_COMM_WORLD);
+
+      gathered.resize(global_count);
+      int out = 0;
+      for (int p = 0; p < NumberOfProcessors; p++)
+        for (int n = 0; n < counts[p]; n++, out++)
+          BHSeedCandidateUnpack(&recv_buffer[byte_displs[p] + n*packed_bytes],
+                                gathered[out]);
+    }
+  } else
+#endif
+  {
+    gathered = BHSeedState.LocalCandidates;
+    global_count = local_count;
+  }
+
+  BHSeedCandidateComparator cmp;
+  cmp.RankingOrder = BHSeedRankingOrder;
+  cmp.UseDeterministicTiebreak = BHSeedDeterministicTiebreak;
+  std::sort(gathered.begin(), gathered.end(), cmp);
+
+  long long ncandidates_exclusion_rejected = 0;
+  long long ncandidates_dedup_rejected = 0;
+  int walk_stopped_at_max = 0;
+
+  std::vector<BHSeedCandidate> accepted;
+  accepted.reserve(gathered.size());
+
+  int max_per_pass = BHSeedMaxPerPass;
+  if (max_per_pass < 0)
+    max_per_pass = 0;
+
+  const float min_sep_com = max(0.0f, BHSeedState.CandidateSeparationComKpcH);
+  const float min_sep2 = min_sep_com * min_sep_com;
+
+  if (max_per_pass == 0 && global_count > 0) {
+    walk_stopped_at_max = 1;
+  } else {
+    for (int n = 0; n < int(gathered.size()); n++) {
+      BHSeedCandidate cand = gathered[n];
+
+      const float exclusion_radius_com =
+        BHSeedExclusionRadiusComKpcHForCandidate(cand.dx_local);
+      if (BHSeedPositionBlockedWithRadius(cand.pos[0], cand.pos[1], cand.pos[2],
+                                          exclusion_radius_com)) {
+        ncandidates_exclusion_rejected++;
+        continue;
+      }
+
+      int reject_dedup = FALSE;
+      if (min_sep_com > 0.0f) {
+        for (int a = 0; a < int(accepted.size()); a++) {
+          float d2 = BHSeedPeriodicDistance2ComKpcH(cand.pos[0], cand.pos[1], cand.pos[2],
+                                                    accepted[a].pos[0], accepted[a].pos[1], accepted[a].pos[2]);
+          if (d2 < min_sep2) {
+            reject_dedup = TRUE;
+            break;
+          }
+        }
+      }
+
+      if (reject_dedup) {
+        ncandidates_dedup_rejected++;
+        continue;
+      }
+
+      cand.accept_rank = int(accepted.size()) + 1;
+      accepted.push_back(cand);
+
+      if (int(accepted.size()) >= max_per_pass) {
+        walk_stopped_at_max = 1;
+        break;
       }
     }
   }
-#endif
 
-  int seed_created = FALSE;
-  if (best_density > -0.5*DBL_MAX) {
-    if (MyProcessorNumber == best_rank) {
-      long long created_before = BHSeedState.CreatedLocal;
-      if (BHSeedCreateLocalBestParticle() == FAIL)
-        return FAIL;
-      seed_created = (BHSeedState.CreatedLocal > created_before) ? TRUE : FALSE;
-    }
+  long long nseeds_skipped_insufficient_gas_local = 0;
+  for (int n = 0; n < int(accepted.size()); n++)
+    if (BHSeedCreateAcceptedCandidate(accepted[n],
+                                      &nseeds_skipped_insufficient_gas_local) == FAIL)
+      return FAIL;
 
-#ifdef USE_MPI
-    if (NumberOfProcessors > 1)
-      MPI_Bcast(&seed_created, 1, MPI_INT, best_rank, MPI_COMM_WORLD);
-#endif
-
-    if (seed_created)
-      BHSeedAppendSeedToGlobalCache(best_x, best_y, best_z);
-  }
+  if (BHSeedSyncCreatedSeedsToGlobalCache() == FAIL)
+    return FAIL;
 
   long long local[16], global[16];
   local[0] = BHSeedState.NCandLocal;
@@ -946,6 +1550,45 @@ int BHSeedFinalizeLevel()
   }
 #endif
 
+  long long ncandidates_gathered_local = local_count;
+  long long ncandidates_gathered_global = ncandidates_gathered_local;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Reduce(&ncandidates_gathered_local, &ncandidates_gathered_global, 1,
+               MPI_LONG_LONG_INT, MPI_SUM, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+
+  long long ncandidates_dedup_rejected_local = ncandidates_dedup_rejected;
+  long long ncandidates_dedup_rejected_global = ncandidates_dedup_rejected_local;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Reduce(&ncandidates_dedup_rejected_local, &ncandidates_dedup_rejected_global,
+               1, MPI_LONG_LONG_INT, MPI_MAX, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+
+  long long ncandidates_exclusion_rejected_local = ncandidates_exclusion_rejected;
+  long long ncandidates_exclusion_rejected_global = ncandidates_exclusion_rejected_local;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Reduce(&ncandidates_exclusion_rejected_local, &ncandidates_exclusion_rejected_global,
+               1, MPI_LONG_LONG_INT, MPI_MAX, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+
+  long long nseeds_skipped_insufficient_gas_global = nseeds_skipped_insufficient_gas_local;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Reduce(&nseeds_skipped_insufficient_gas_local,
+               &nseeds_skipped_insufficient_gas_global,
+               1, MPI_LONG_LONG_INT, MPI_SUM, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+
+  int walk_stopped_at_max_global = walk_stopped_at_max;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Reduce(&walk_stopped_at_max, &walk_stopped_at_max_global,
+               1, MPI_INT, MPI_MAX, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+
   int dm_available_local = BHSeedState.DMFieldAvailableLocal;
   int dm_available_global = dm_available_local;
 #ifdef USE_MPI
@@ -962,6 +1605,32 @@ int BHSeedFinalizeLevel()
     MPI_Reduce(&seeding_wall_ms_local, &seeding_wall_ms, 1, MPI_DOUBLE, MPI_MAX,
                ROOT_PROCESSOR, MPI_COMM_WORLD);
 #endif
+
+  long long accepted_count_local = accepted.size();
+  long long accepted_count_global = accepted_count_local;
+  long long created_count_global_all = BHSeedState.CreatedLocal;
+  long long skipped_count_global_all = nseeds_skipped_insufficient_gas_local;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1) {
+    MPI_Allreduce(&accepted_count_local, &accepted_count_global, 1,
+                  MPI_LONG_LONG_INT, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(&BHSeedState.CreatedLocal, &created_count_global_all, 1,
+                  MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&nseeds_skipped_insufficient_gas_local,
+                  &skipped_count_global_all, 1,
+                  MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+  }
+#endif
+
+  int invariant_bad = 0;
+  if (created_count_global_all + skipped_count_global_all != accepted_count_global)
+    invariant_bad = 1;
+#ifdef USE_MPI
+  if (NumberOfProcessors > 1)
+    MPI_Bcast(&invariant_bad, 1, MPI_INT, ROOT_PROCESSOR, MPI_COMM_WORLD);
+#endif
+  if (invariant_bad)
+    ENZO_FAIL("BHSeed invariant failed: created + skipped must equal accepted candidates.");
 
   if (MyProcessorNumber == ROOT_PROCESSOR) {
     BHSeedStepCounter++;
@@ -986,6 +1655,15 @@ int BHSeedFinalizeLevel()
     if (global[12] > 0 && global[13] > (long long) (0.25 * double(global[12])))
       fprintf(logptr, "WARNING: >25%% of kernel evaluations were truncated at grid boundaries.\n");
 
+    if (ncandidates_gathered_global > 500)
+      fprintf(logptr, "WARNING: large number of candidates gathered. Consider tightening gate thresholds.\n");
+
+    float excl_phys_kpc = BHSeedExclusionRadius;
+    if (BHSeedExclusionMode == 1)
+      excl_phys_kpc = BHSeedExclusionRadius * BHSeedState.APhys / BHSeedState.HubbleParam;
+    else if (BHSeedExclusionMode == 2)
+      excl_phys_kpc = BHSeedState.ExclusionRadiusComKpcH * BHSeedState.APhys / BHSeedState.HubbleParam;
+
     fprintf(logptr,
             "[BHSEED] step=%d level=%d z=%.4f a_phys=%.6f "
             "excl_phys_kpc=%.1f excl_com_kpch=%.1f "
@@ -997,17 +1675,23 @@ int BHSeedFinalizeLevel()
             "ngates_finestlevel=%lld ngates_peak=%lld "
             "nkernel_evaluated=%lld nkernel_truncated=%lld "
             "nlegacy_cellmass_would_fail=%lld ngates_enclosedmass=%lld "
-            "seeding_wall_ms=%.3f\n",
+            "seeding_wall_ms=%.3f "
+            "nseeds_created=%lld ncandidates_gathered=%lld "
+            "ncandidates_dedup_rejected=%lld ncandidates_exclusion_rejected=%lld "
+            "walk_stopped_at_max=%d nseeds_skipped_insufficient_gas=%lld\n",
             BHSeedStepCounter, BHSeedState.Level, BHSeedState.Zred,
             double(BHSeedState.A)/(1.0 + InitialRedshift),
-            BHSeedExclusionRadius, BHSeedState.ExclusionRadiusComKpcH,
+            excl_phys_kpc, BHSeedState.ExclusionRadiusComKpcH,
             BHSeedState.CellSizeCode,
             BHSeedState.NBins[0], BHSeedState.NBins[1], BHSeedState.NBins[2],
             ncand_min, ncand_max, global[0],
             global[1], global[2], global[3], global[4], global[5], global[6],
             global[7], global[8], global[9], int(BHSeedState.X.size()),
             BHSeedState.PreCacheBH, global[10], global[11],
-            global[12], global[13], global[14], global[15], seeding_wall_ms);
+            global[12], global[13], global[14], global[15], seeding_wall_ms,
+            global[9], ncandidates_gathered_global,
+            ncandidates_dedup_rejected_global, ncandidates_exclusion_rejected_global,
+            walk_stopped_at_max_global, nseeds_skipped_insufficient_gas_global);
   }
 
   BHSeedState.Active = FALSE;
