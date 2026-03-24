@@ -869,32 +869,69 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
 
   const float seed_density_before = GridData->BaryonField[DensNum][index0];
 
+  std::vector<double> dm_removed(active_index.size(), 0.0);
+
   double removed_mass = 0.0;
   double momentum_x = 0.0;
   double momentum_y = 0.0;
   double momentum_z = 0.0;
+  double remaining_to_remove = bh_mass_code;
+  double remaining_available = active_zone_mass;
 
   for (int n = 0; n < int(active_index.size()); n++) {
-    const int nindex = active_index[n];
     const double mcell = active_mass[n];
 
     double dm = 0.0;
     if (n == int(active_index.size()) - 1)
-      dm = bh_mass_code - removed_mass;
-    else
-      dm = bh_mass_code * (mcell / active_zone_mass);
+      dm = remaining_to_remove;
+    else if (remaining_available > 0.0)
+      dm = remaining_to_remove * (mcell / remaining_available);
 
     dm = max(0.0, dm);
     dm = min(dm, mcell);
 
+    dm_removed[n] = dm;
+    remaining_to_remove -= dm;
+    remaining_available -= mcell;
+  }
+
+  if (remaining_to_remove != 0.0) {
+    if (remaining_to_remove > 0.0) {
+      for (int n = int(active_index.size()) - 1;
+           n >= 0 && remaining_to_remove > 0.0; n--) {
+        const double cap = active_mass[n] - dm_removed[n];
+        if (cap <= 0.0)
+          continue;
+        const double add = min(cap, remaining_to_remove);
+        dm_removed[n] += add;
+        remaining_to_remove -= add;
+      }
+    } else {
+      for (int n = int(active_index.size()) - 1;
+           n >= 0 && remaining_to_remove < 0.0; n--) {
+        if (dm_removed[n] <= 0.0)
+          continue;
+        const double sub = min(dm_removed[n], -remaining_to_remove);
+        dm_removed[n] -= sub;
+        remaining_to_remove += sub;
+      }
+    }
+  }
+
+  for (int n = 0; n < int(active_index.size()); n++) {
+    const int nindex = active_index[n];
+    const double dm = dm_removed[n];
+    if (dm <= 0.0)
+      continue;
+
     const double rho_old = GridData->BaryonField[DensNum][nindex];
-    double rho_new = rho_old - dm / cell_volume_code;
+    const double mold = rho_old * cell_volume_code;
+    const double mnew = max(0.0, mold - dm);
+    double rho_new = mnew / cell_volume_code;
     if (rho_new < 0.0)
       rho_new = 0.0;
 
     if (HydroMethod == PPM_DirectEuler) {
-      const double mold = rho_old * cell_volume_code;
-      const double mnew = rho_new * cell_volume_code;
       if (mold > 0.0 && mnew > 0.0) {
         const double vx = active_velx[n];
         const double vy = active_vely[n];
@@ -930,6 +967,9 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     momentum_z += dm * active_velz[n];
   }
 
+  const double rel_mass_err =
+    (bh_mass_code > 0.0) ? fabs(removed_mass - bh_mass_code) / bh_mass_code : 0.0;
+
   ParticleEntry p;
   p.Position[0] = cand.pos[0];
   p.Position[1] = cand.pos[1];
@@ -944,6 +984,29 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
   p.Type = PARTICLE_TYPE_MBH;
   p.Number = INT_UNDEFINED;
   p.Mass = bh_mass_code;
+
+  if (BHSeedVerbose >= 2) {
+    const double mom_x_particle = double(p.Mass) * double(p.Velocity[0]);
+    const double mom_y_particle = double(p.Mass) * double(p.Velocity[1]);
+    const double mom_z_particle = double(p.Mass) * double(p.Velocity[2]);
+    const double rel_mom_x_err =
+      (fabs(momentum_x) > 0.0) ? fabs(momentum_x - mom_x_particle) / fabs(momentum_x) : 0.0;
+    const double rel_mom_y_err =
+      (fabs(momentum_y) > 0.0) ? fabs(momentum_y - mom_y_particle) / fabs(momentum_y) : 0.0;
+    const double rel_mom_z_err =
+      (fabs(momentum_z) > 0.0) ? fabs(momentum_z - mom_z_particle) / fabs(momentum_z) : 0.0;
+    FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    fprintf(logptr,
+            "[BHSEED_DEBUG] active_zone_mass_code=%.15e sum_dm_removed=%.15e "
+            "bh_mass_code=%.15e p_mass_code=%.15e rel_mass_err=%.3e "
+            "mom_x_removed=%.15e mom_y_removed=%.15e mom_z_removed=%.15e "
+            "mom_x_particle=%.15e mom_y_particle=%.15e mom_z_particle=%.15e "
+            "rel_mom_x_err=%.3e rel_mom_y_err=%.3e rel_mom_z_err=%.3e\n",
+            active_zone_mass, removed_mass, bh_mass_code, double(p.Mass), rel_mass_err,
+            momentum_x, momentum_y, momentum_z,
+            mom_x_particle, mom_y_particle, mom_z_particle,
+            rel_mom_x_err, rel_mom_y_err, rel_mom_z_err);
+  }
 
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_CREATION_TIME)
     p.Attribute[PARTICLE_ATTRIBUTE_CREATION_TIME] = GridData->Time;
