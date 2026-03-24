@@ -70,6 +70,7 @@ struct yt_grid;
 extern int CommunicationDirection;
 int FindField(int f, int farray[], int n);
 struct LevelHierarchyEntry;
+struct BHSeedCandidate;
 class ActiveParticleType;
 class ActiveParticle_AccretingParticle;
 
@@ -243,6 +244,8 @@ class grid
                         float CellWidthTemp,
                         float DensityUnits, float LengthUnits, float TimeUnits,
                         int MaximumRefinementLevel);
+  friend int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
+                                        long long *nskipped_insufficient_gas);
   friend int BHSeedCreateLocalBestParticle();
 
 #ifdef NEW_PROBLEM_TYPES
