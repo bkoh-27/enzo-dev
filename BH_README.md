@@ -89,6 +89,107 @@ The runtime log prints both:
 - `excl_phys_kpc`
 - `excl_com_kpch`
 
+## Detailed Parameter Explanations (Added in v1.5)
+This section expands the quick parameter table with practical behavior notes for each added BH seeding control.
+
+### 1) Enable and cadence controls
+- `BHSeedingMethod`
+  - Master on/off switch for the MBH seeding module.
+  - `0`: seeding code path is skipped.
+  - `1`: seeding path runs before star formation on each eligible level pass.
+- `BHSeedRunEveryTimestep`
+  - Controls cadence under subcycling.
+  - `0` (default): follows root-grid cadence logic.
+  - `1`: force seeding evaluation every sub-step.
+
+### 2) Core local gas gates
+- `BHSeedOverdensityThreshold`
+  - Minimum local gas density gate. Cells below this are rejected early (`ngates_density`).
+  - Raising this value strongly reduces candidate count.
+- `BHSeedTemperatureThreshold`
+  - Maximum local gas temperature gate (`ngates_temp`).
+  - Lower values prefer colder gas and reduce seeds.
+- `BHSeedMetallicityThreshold`
+  - Maximum local metallicity fraction gate (`ngates_metal`).
+  - Lower values restrict seeding to more metal-poor gas.
+- `BHSeedMetallicityThresholdInSolar`
+  - Convenience input in solar units (`Z/Zsun`).
+  - Converted internally to absolute fraction (using `Zsun = 0.02`) and mapped to `BHSeedMetallicityThreshold`.
+
+### 3) Structural and optional physics gates
+- `BHSeedRequireFinestLevel`
+  - If `1`, reject cells covered by finer AMR subgrids (`ngates_finestlevel`).
+  - Helps avoid parent-level duplicates.
+- `BHSeedRequireLocalPeak`
+  - If `1`, require candidate to be a 26-neighbor local density peak (`ngates_peak`).
+  - If `0`, many more cells can pass downstream gates.
+- `BHSeedVelDivCrit`
+  - If `1`, require converging flow (`div(v) < 0`, tracked by `ngates_conv`).
+- `BHSeedThermalCrit`
+  - If `1`, apply cooling-time/dynamical-time filter (`ngates_cool`).
+- `BHSeedSelfBoundCrit`
+  - If `1`, apply self-bound criterion (`alpha < 1`, tracked by `ngates_bound`).
+
+### 4) Kernel and mass constraints
+- `BHSeedPatchRadius`
+  - Radius of the spherical kernel used for enclosed-property evaluation.
+  - Larger values sample broader environment but can increase truncation near boundaries.
+- `BHSeedMinEnclosedMass`
+  - Minimum enclosed kernel gas mass required to pass (`ngates_enclosedmass`).
+  - Runtime hard check: must be `>= BHSeedMass`.
+- `BHSeedMass`
+  - Fixed mass assigned to each created BH seed.
+  - Also the target mass removed from gas during kernel-distributed removal.
+- `BHSeedLegacyCellMassGate`
+  - Legacy single-cell mass check behavior:
+  - `0` (default): shadow-only (`nlegacy_cellmass_would_fail` increments, no rejection).
+  - `1`: hard reject at legacy gate (`ngates_mass`).
+
+### 5) Exclusion geometry controls
+- `BHSeedExclusionMode`
+  - Chooses exclusion-radius interpretation for candidate-vs-existing-BH blocking.
+  - `0`: fixed physical kpc (`BHSeedExclusionRadius` interpreted as physical).
+  - `1`: fixed comoving kpc/h (`BHSeedExclusionRadius` interpreted as comoving).
+  - `2`: resolution-scaled (`BHSeedExclusionCells * dx_candidate`).
+- `BHSeedExclusionRadius`
+  - Radius input used by mode 0 or mode 1 (units depend on mode).
+- `BHSeedExclusionCells`
+  - Integer cell multiplier used only in mode 2.
+
+### 6) Ranking, de-duplication, and multiplicity controls
+- `BHSeedRankingOrder`
+  - Global lexicographic sort priority among kernel-qualified candidates.
+  - `0`: enclosed-mass first, then peak density, then metallicity, then tiebreak.
+  - `1`: peak-density first, then enclosed mass, then metallicity, then tiebreak.
+- `BHSeedDeterministicTiebreak`
+  - Enables deterministic position-based tie resolution in global sorting.
+  - Keeps acceptance order reproducible across MPI layouts.
+- `BHSeedMinCandidateSeparation`
+  - Within-pass de-duplication radius in physical kpc.
+  - If two accepted-walk candidates are too close, lower-ranked candidate is rejected (`ncandidates_dedup_rejected`).
+- `BHSeedMaxPerPass`
+  - Hard cap on accepted candidates processed per level pass.
+  - Acceptance walk stops when this limit is reached (`walk_stopped_at_max=1`).
+
+### 7) Metadata and diagnostics controls
+- `BHSeedChannel`
+  - User channel tag stored in BH metadata (`bhseed_channel`) for downstream analysis.
+- `BHSeedVerbose`
+  - Logging verbosity:
+  - `0`: only core structured pass-level logs.
+  - `1`: include per-seed `[BHSEED_SEED]` metadata lines.
+  - `>=2`: include debug conservation diagnostics (`[BHSEED_DEBUG]`).
+
+### 8) Practical tuning effects (quick guide)
+- If `ncand_global` is very high:
+  - raise `BHSeedOverdensityThreshold`, enable/keep `BHSeedRequireLocalPeak=1`, tighten `BHSeedTemperatureThreshold` and `BHSeedMetallicityThreshold`.
+- If almost everything is blocked by exclusion (`dist_blocked` high):
+  - reduce exclusion radius (or choose a different exclusion mode consistent with your science intent).
+- If many candidates fail enclosed mass (`ngates_enclosedmass` high):
+  - increase local gas availability or reduce `BHSeedMinEnclosedMass` while keeping `BHSeedMinEnclosedMass >= BHSeedMass`.
+- If many accepted candidates are skipped (`nseeds_skipped_insufficient_gas` high):
+  - reduce `BHSeedMass`, reduce `BHSeedPatchRadius`, or improve active-zone gas support near boundaries.
+
 ## Runtime Validation (Phase 3)
 At startup, Enzo aborts if:
 - `BHSeedMinEnclosedMass < BHSeedMass`
