@@ -875,6 +875,9 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
   double momentum_x = 0.0;
   double momentum_y = 0.0;
   double momentum_z = 0.0;
+  int removed_cells = 0;
+  double min_rho_after = DBL_MAX;
+  double max_remove_fraction = 0.0;
   double remaining_to_remove = bh_mass_code;
   double remaining_available = active_zone_mass;
 
@@ -930,6 +933,11 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     double rho_new = mnew / cell_volume_code;
     if (rho_new < 0.0)
       rho_new = 0.0;
+
+    removed_cells++;
+    min_rho_after = min(min_rho_after, rho_new);
+    if (mold > 0.0)
+      max_remove_fraction = max(max_remove_fraction, dm / mold);
 
     if (HydroMethod == PPM_DirectEuler) {
       if (mold > 0.0 && mnew > 0.0) {
@@ -996,16 +1004,20 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     const double rel_mom_z_err =
       (fabs(momentum_z) > 0.0) ? fabs(momentum_z - mom_z_particle) / fabs(momentum_z) : 0.0;
     FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    if (removed_cells == 0)
+      min_rho_after = -1.0;
     fprintf(logptr,
             "[BHSEED_DEBUG] active_zone_mass_code=%.15e sum_dm_removed=%.15e "
             "bh_mass_code=%.15e p_mass_code=%.15e rel_mass_err=%.3e "
             "mom_x_removed=%.15e mom_y_removed=%.15e mom_z_removed=%.15e "
             "mom_x_particle=%.15e mom_y_particle=%.15e mom_z_particle=%.15e "
-            "rel_mom_x_err=%.3e rel_mom_y_err=%.3e rel_mom_z_err=%.3e\n",
+            "rel_mom_x_err=%.3e rel_mom_y_err=%.3e rel_mom_z_err=%.3e "
+            "removed_cells=%d min_rho_after=%.15e max_remove_fraction=%.15e\n",
             active_zone_mass, removed_mass, bh_mass_code, double(p.Mass), rel_mass_err,
             momentum_x, momentum_y, momentum_z,
             mom_x_particle, mom_y_particle, mom_z_particle,
-            rel_mom_x_err, rel_mom_y_err, rel_mom_z_err);
+            rel_mom_x_err, rel_mom_y_err, rel_mom_z_err,
+            removed_cells, min_rho_after, max_remove_fraction);
   }
 
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_CREATION_TIME)
