@@ -13,9 +13,9 @@ This branch adds a standalone MBH seeding path to Enzo.
 
 Main code files:
 - `src/enzo/star_maker_bh_seed.C` (local cell gating)
-- `src/enzo/mbh_maker2.C` (distance/mass filtering and local winner)
+- `src/enzo/mbh_maker2.C` (candidate kernel evaluation and local candidate list build)
 - `src/enzo/Grid_MBHMaker2Handler.C` (grid wrapper)
-- `src/enzo/Grid_BHSeedHandler.C` (global cache, MPI winner, logging)
+- `src/enzo/Grid_BHSeedHandler.C` (global gather/sort/accept walk, multi-seed creation, logging)
 
 The BH seeding pass runs before normal star formation when `BHSeedingMethod = 1`.
 
@@ -39,10 +39,14 @@ For each level pass:
    - kernel density peak,
    - kernel completeness flag.
 7. Reject candidates with enclosed mass below `BHSeedMinEnclosedMass`.
-8. Choose one deterministic winner globally (MPI-safe, still one winner per pass).
-9. Create at most one MBH per level pass and write per-seed metadata.
-10. Mark the seeded cell so star formation skips that exact cell in the same pass.
-11. Print a `[BHSEED]` diagnostic line (and `[BHSEED_SEED]` lines when verbose logging is on).
+8. Gather all surviving candidates across MPI ranks.
+9. Sort candidates with deterministic lexicographic ranking (`BHSeedRankingOrder` + deterministic tiebreak).
+10. Walk sorted candidates and accept up to `BHSeedMaxPerPass` with:
+   - exclusion against pre-existing BHs (`BHSeedExclusionMode`),
+   - within-pass de-duplication (`BHSeedMinCandidateSeparation`).
+11. For accepted candidates, create BHs in global acceptance order and perform kernel-distributed active-zone gas removal.
+12. Mark created-seed cells so star formation skips those exact cells in the same pass.
+13. Print `[BHSEED]` and verbose `[BHSEED_SEED]` diagnostics.
 
 ## BH Parameters (Beginner Table)
 Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
@@ -64,25 +68,32 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 | `BHSeedMinEnclosedMass` | `1e6` | `float`, **Phase 2 active**. Minimum enclosed gas mass required by the kernel gate. | Msun |
 | `BHSeedMass` | `1e5` | `float`, **Phase 1 active**. Mass of each seeded BH particle. | Msun |
 | `BHSeedChannel` | `0` | `int`, **Phase 1 active (metadata)**. Stored on each created BH in seed metadata (`bhseed_channel`). | channel id |
-| `BHSeedExclusionMode` | `2` | `int`, **parsed-only placeholder (Phase 3+)**. Future exclusion algorithm selector. | mode id |
+| `BHSeedExclusionMode` | `2` | `int`, **Phase 3 active**. Exclusion radius mode: `0` physical kpc, `1` comoving kpc/h, `2` resolution-scaled (`BHSeedExclusionCells * dx`). | mode id |
 | `BHSeedExclusionRadius` | `100.0` | `float`, **Phase 1 active**. Minimum allowed distance from any existing BH/MBH. If candidate is closer, it is blocked. | **physical kpc** |
-| `BHSeedExclusionCells` | `16` | `int`, **parsed-only placeholder (Phase 3+)**. Future cell-based exclusion window. | cells |
-| `BHSeedMinCandidateSeparation` | `3.0` | `float`, **parsed-only placeholder (Phase 3+)**. Future candidate de-dup separation setting. | cells |
-| `BHSeedMaxPerPass` | `10` | `int`, **parsed-only placeholder (Phase 3+)**. Future per-pass multi-seed cap. | count |
+| `BHSeedExclusionCells` | `16` | `int`, **Phase 3 active**. Used when `BHSeedExclusionMode = 2`: candidate-centric exclusion radius `R = BHSeedExclusionCells * dx_candidate`. | cells |
+| `BHSeedMinCandidateSeparation` | `3.0` | `float`, **Phase 3 active**. Minimum within-pass separation between accepted candidates. | physical kpc |
+| `BHSeedMaxPerPass` | `10` | `int`, **Phase 3 active**. Maximum number of accepted candidates processed per level pass. | count |
 | `BHSeedRunEveryTimestep` | `0` | `int (bool-style)`, **Phase 1 active**. If `1`, run every sub-cycle; if `0`, run with root-grid cadence logic. | boolean-style int |
-| `BHSeedRankingOrder` | `0` | `int`, **parsed-only placeholder (Phase 3+)**. Future ranking-order selector for tie resolution. | enum id |
+| `BHSeedRankingOrder` | `0` | `int`, **Phase 3 active**. Ranking key order: `0` enclosed-mass-first, `1` density-peak-first. | enum id |
 | `BHSeedVerbose` | `1` | `int`, **Phase 2 active**. Controls BH seeding log verbosity (`[BHSEED]` + `[BHSEED_SEED]` kernel metadata line). | verbosity level |
-| `BHSeedDeterministicTiebreak` | `1` | `int (bool-style)`, **parsed-only placeholder (Phase 3+)**. Reserved deterministic tie-break selector. | boolean-style int |
+| `BHSeedDeterministicTiebreak` | `1` | `int (bool-style)`, **Phase 3 active**. Enables deterministic position-based final tie-break in global sort. | boolean-style int |
 
-### Important Unit Note for `BHSeedExclusionRadius`
-You set it in physical kpc.
+### Important Unit Note for Exclusion Radius Modes
+- Mode 0 (`BHSeedExclusionMode = 0`): `BHSeedExclusionRadius` is interpreted as **physical kpc**.
+- Mode 1 (`BHSeedExclusionMode = 1`): `BHSeedExclusionRadius` is interpreted as **comoving kpc/h**.
+  - physical conversion used in logs: `R_phys_kpc = R_com_kpc/h * a_phys / h`.
+- Mode 2 (`BHSeedExclusionMode = 2`): radius is candidate-centric and computed as
+  - `R_excl = BHSeedExclusionCells * dx_candidate`.
 
-In cosmological runs, code converts internally for comparison:
-- `R_comoving_kpc/h = R_physical_kpc * h / a_phys`
-
-The runtime log shows both values so you can verify conversion:
+The runtime log prints both:
 - `excl_phys_kpc`
 - `excl_com_kpch`
+
+## Runtime Validation (Phase 3)
+At startup, Enzo aborts if:
+- `BHSeedMinEnclosedMass < BHSeedMass`
+
+This protects fixed-mass kernel removal from impossible parameter combinations.
 
 ## Recommended Explicit Settings (Do Not Rely on Defaults)
 For reproducibility, set BH flags explicitly in your parameter file:
@@ -97,13 +108,13 @@ BHSeedPatchRadius                 = 3.0
 BHSeedMinEnclosedMass             = 1e6
 BHSeedMass                        = 1e5
 BHSeedChannel                     = 0
-BHSeedExclusionMode               = 2        # Phase 3+ parsed-only in Phase 1
+BHSeedExclusionMode               = 2
 BHSeedExclusionRadius             = 100.0
-BHSeedExclusionCells              = 16       # Phase 3+ parsed-only in Phase 1
-BHSeedMinCandidateSeparation      = 3.0      # Phase 3+ parsed-only in Phase 1
-BHSeedMaxPerPass                  = 10       # Phase 3+ parsed-only in Phase 1
+BHSeedExclusionCells              = 16
+BHSeedMinCandidateSeparation      = 3.0
+BHSeedMaxPerPass                  = 10
 BHSeedRunEveryTimestep            = 0
-BHSeedRankingOrder                = 0        # Phase 3+ parsed-only in Phase 1
+BHSeedRankingOrder                = 0
 BHSeedVelDivCrit                  = 1
 BHSeedLegacyCellMassGate          = 0
 BHSeedThermalCrit                 = 0
@@ -111,7 +122,7 @@ BHSeedSelfBoundCrit               = 0
 BHSeedRequireFinestLevel          = 1
 BHSeedRequireLocalPeak            = 1
 BHSeedVerbose                     = 1
-BHSeedDeterministicTiebreak       = 1        # Phase 3+ parsed-only in Phase 1
+BHSeedDeterministicTiebreak       = 1
 ```
 
 ## Understanding `[BHSEED]` Log Output
@@ -125,6 +136,9 @@ ngates_bound=... ngates_mass=... dist_blocked=... created=... total_mbh=... pre_
 ngates_finestlevel=... ngates_peak=...
 nkernel_evaluated=... nkernel_truncated=... nlegacy_cellmass_would_fail=...
 ngates_enclosedmass=... seeding_wall_ms=...
+nseeds_created=... ncandidates_gathered=... ncandidates_dedup_rejected=...
+ncandidates_exclusion_rejected=... walk_stopped_at_max=...
+nseeds_skipped_insufficient_gas=...
 ```
 
 Key fields:
@@ -141,6 +155,12 @@ Key fields:
 - `nlegacy_cellmass_would_fail`: shadow count for legacy cell-mass check.
 - `ngates_enclosedmass`: candidates rejected by `BHSeedMinEnclosedMass`.
 - `seeding_wall_ms`: wall-clock time for the full level seeding pass (ms).
+- `nseeds_created`: authoritative Phase 3 created-seed count.
+- `ncandidates_gathered`: global candidate count before ranking/acceptance.
+- `ncandidates_dedup_rejected`: candidates rejected by within-pass separation.
+- `ncandidates_exclusion_rejected`: candidates rejected by exclusion during acceptance walk.
+- `walk_stopped_at_max`: `1` if walk stopped at `BHSeedMaxPerPass`.
+- `nseeds_skipped_insufficient_gas`: accepted candidates skipped at creation time because active-zone removable mass is insufficient.
 
 Log compatibility note:
 - New fields are appended at the end of the existing `[BHSEED]` line after all legacy and Phase 1 fields.
@@ -155,7 +175,7 @@ patch_metal=... patch_density_peak=... kernel_complete=... host_dm_density=... a
 This line reports per-seed metadata values written into particle attributes/HDF5.
 `patch_density_peak` is the kernel maximum (not the candidate-cell density placeholder used in Phase 1).
 
-## Seed Metadata Fields (Phase 2)
+## Seed Metadata Fields (Phase 3)
 The BH seeding path stores 8 metadata attributes on MBH particles.
 All are checkpoint/restart-safe and migrate with particles across MPI ranks.
 
@@ -171,7 +191,7 @@ Note on storage type:
 | `BHSeedPatchDensityPeak` | `bhseed_patch_density_peak` | `8 / 11` | maximum density inside evaluated kernel | active in Phase 2 |
 | `BHSeedKernelComplete` | `bhseed_kernel_complete` | `9 / 12` | `1` complete, `0` truncated | active in Phase 2 |
 | `BHSeedHostDMDensity` | `bhseed_host_dm_density` | `10 / 13` | local DM density if available, else `-1.0` | active in Phase 2 |
-| `BHSeedAcceptRank` | `bhseed_accept_rank` | `11 / 14` | `-1.0` (`-1` semantic) | placeholder (Phase 3+) |
+| `BHSeedAcceptRank` | `bhseed_accept_rank` | `11 / 14` | global acceptance order (`1, 2, 3, ...`) | active in Phase 3 |
 
 Quick inspection example:
 
