@@ -1129,6 +1129,32 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHSeedDeterministicTiebreak = %"ISYM,
 		  &BHSeedDeterministicTiebreak);
 
+    ret += sscanf(line, "BHAccretionMethod = %"ISYM, &BHAccretionMethod);
+    ret += sscanf(line, "BHAccretionKernelRadius = %"FSYM,
+		  &BHAccretionKernelRadius);
+    ret += sscanf(line, "BHAccretionRemovalRadius = %"ISYM,
+		  &BHAccretionRemovalRadius);
+    ret += sscanf(line, "BHAccretionTSplitFloor = %"FSYM,
+		  &BHAccretionTSplitFloor);
+    ret += sscanf(line, "BHAccretionColdModel = %"ISYM, &BHAccretionColdModel);
+    ret += sscanf(line, "BHAccretionCVisc = %"FSYM, &BHAccretionCVisc);
+    ret += sscanf(line, "BHAccretionNHStar = %"FSYM, &BHAccretionNHStar);
+    ret += sscanf(line, "BHAccretionBeta = %"FSYM, &BHAccretionBeta);
+    ret += sscanf(line, "BHAccretionAlphaMax = %"FSYM, &BHAccretionAlphaMax);
+    ret += sscanf(line, "BHAccretionRadiativeEfficiency = %"FSYM,
+		  &BHAccretionRadiativeEfficiency);
+    ret += sscanf(line, "BHAccretionSuperEddington = %"ISYM,
+		  &BHAccretionSuperEddington);
+    ret += sscanf(line, "BHAccretionSuperEddFactor = %"FSYM,
+		  &BHAccretionSuperEddFactor);
+    ret += sscanf(line, "BHAccretionUseReservoir = %"ISYM,
+		  &BHAccretionUseReservoir);
+    ret += sscanf(line, "BHAccretionRemovalMode = %"ISYM,
+		  &BHAccretionRemovalMode);
+    ret += sscanf(line, "BHAccretionVerbose = %"ISYM, &BHAccretionVerbose);
+    ret += sscanf(line, "BHAccretionRunEveryTimestep = %"ISYM,
+		  &BHAccretionRunEveryTimestep);
+
     ret += sscanf(line, "H2StarMakerEfficiency = %"FSYM,
 		  &H2StarMakerEfficiency);
     ret += sscanf(line, "H2StarMakerNumberDensityThreshold = %"FSYM,
@@ -2202,6 +2228,23 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
               "cells at BHSeedOverdensityThreshold may not have enough gas. "
               "Monitor ngates_mass in [BHSEED] log.\n", BHSeedMass);
   }
+
+  if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
+    ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics).");
+
+  if (BHAccretionMethod) {
+    if (BHAccretionKernelRadius <= 0.0f)
+      ENZO_FAIL("BHAccretionKernelRadius must be positive (units: physical kpc).");
+    if (BHAccretionCVisc <= 0.0f)
+      ENZO_FAIL("BHAccretionCVisc must be positive.");
+    if (BHAccretionRadiativeEfficiency <= 0.0f ||
+        BHAccretionRadiativeEfficiency >= 1.0f)
+      ENZO_FAIL("BHAccretionRadiativeEfficiency must satisfy 0 < epsilon_r < 1.");
+    if (BHAccretionColdModel != 0)
+      ENZO_FAIL("BHAccretionColdModel must be 0 in Phase A (AM-suppressed Bondi).");
+  }
+  if (BHAccretionRunEveryTimestep != 0 && BHAccretionRunEveryTimestep != 1)
+    ENZO_FAIL("BHAccretionRunEveryTimestep must be 0 or 1.");
 
   /* Cosmic ray diffusion should be off if Cosmic rays are off */
   if(CRDiffusion > 0 && CRModel == 0){

@@ -445,3 +445,104 @@ This one test verifies all of the following:
 - Always set BH parameters explicitly in your production `.enzo` file.
 - Capture stdout and archive it; `[BHSEED]` lines are your primary debugging signal.
 - Track `ngates_*`, `dist_blocked`, `created`, and `pre_cache_bh` over time.
+
+## BH Accretion Phase A (Diagnostics Only)
+Phase A adds a per-BH diagnostic pass for accretion physics. It is measurement-only.
+
+What Phase A does:
+- loops over MBH particles each level update,
+- evaluates a spherical gas kernel around each BH,
+- classifies kernel gas into hot/cold channels using `t_cool / t_dyn` (with deterministic temperature fallback),
+- computes channel-averaged gas properties,
+- computes diagnostic hot/cold Bondi-family rates, Eddington rate/ratio, and a diagnostic Eddington cap split,
+- writes per-BH diagnostics to `[BHACCR]` log lines,
+- updates BH accretion metadata attributes needed by later phases.
+
+What Phase A does **not** do:
+- no gas removal,
+- no BH mass growth,
+- no reservoir drainage,
+- no feedback coupling.
+
+Call ordering:
+- BH seeding finalize completes first (`BHSeedFinalizeLevel`),
+- then `BHAccretionDiagnosticHandler`,
+- then normal star/active particle handlers.
+
+### Accretion Parameters (Phase A)
+Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
+
+| Parameter | Default | Phase A status |
+| --- | --- | --- |
+| `BHAccretionMethod` | `1` | active (`0` off, `1` two-channel diagnostics) |
+| `BHAccretionKernelRadius` | `3.0` | active (physical kpc) |
+| `BHAccretionRemovalRadius` | `1` | reserved (Phase B) |
+| `BHAccretionTSplitFloor` | `5e5` | active (K, fallback split) |
+| `BHAccretionColdModel` | `0` | active (AM-suppressed Bondi) |
+| `BHAccretionCVisc` | `6.283` | active |
+| `BHAccretionNHStar` | `0.1` | active (cm^-3) |
+| `BHAccretionBeta` | `1.0` | active |
+| `BHAccretionAlphaMax` | `10.0` | active |
+| `BHAccretionRadiativeEfficiency` | `0.1` | active (`epsilon_r` for Eddington rate) |
+| `BHAccretionSuperEddington` | `0` | reserved (Phase C) |
+| `BHAccretionSuperEddFactor` | `1.0` | reserved (Phase C) |
+| `BHAccretionUseReservoir` | `0` | reserved (v2) |
+| `BHAccretionRemovalMode` | `0` | reserved (Phase B) |
+| `BHAccretionVerbose` | `1` | active |
+| `BHAccretionRunEveryTimestep` | `0` | active (`0` finest-only cadence, `1` every processed update) |
+
+### Runtime Validation and Warnings
+Hard startup errors:
+- `BHAccretionMethod` must be `0` or `1`.
+- `BHAccretionKernelRadius > 0`.
+- `BHAccretionCVisc > 0`.
+- `0 < BHAccretionRadiativeEfficiency < 1`.
+- `BHAccretionColdModel == 0` (Phase A restriction).
+
+Runtime warning examples (`[BHACCR_WARN]`):
+- kernel radius under-resolved (`kernel_radius_over_dx < 1.5`),
+- kernel likely exceeds ghost support (`kernel_radius_over_dx > 3`),
+- fallback fraction exceeds 50% of kernel cells,
+- `alpha_boost` at configured cap (`BHAccretionAlphaMax`).
+
+### `[BHACCR]` Log Line
+One line per BH per diagnostic pass. Includes:
+- context: `step`, `level`, `z`, `bh_id`, `bh_mass`,
+- kernel split: `f_hot`, `f_cold`, `n_hot_cells`, `n_cold_cells`, `n_fallback_cells`,
+- averaged gas properties: `rho_hot_avg`, `rho_cold_avg`, `T_hot_avg`, `T_cold_avg`, `cs_hot_avg`,
+- kinematics: `V_rot_cold`, `v_rel_hot`, `v_rel_cold`,
+- rates: `Mdot_hot_raw`, `Mdot_cold_raw`, `Mdot_total_raw`, `Mdot_Edd`, `f_Edd`,
+- channel factors: `alpha_boost`, `f_AM`,
+- diagnostic capped split: `Mdot_actual`, `Mdot_hot_actual`, `Mdot_cold_actual`, `cap_active`,
+- performance: `accretion_diag_wall_ms`.
+
+Units in logs:
+- densities in cgs,
+- temperatures in K,
+- velocities in cm/s,
+- rates in Msun/yr.
+
+### BH Accretion Metadata Attributes
+Phase A registers/checkpoints the following MBH attributes:
+- `BHAccretedMass` (stays unchanged in Phase A),
+- `BHReservoirMass` (stays unchanged in Phase A),
+- `BHLastAccretionRedshift` (unchanged in Phase A),
+- `BHLastEddingtonRatio` (updated every diagnostic pass),
+- `BHFormationMass` (seed-set value, preserved).
+
+These are mapped in `typedefs.h` and persisted via normal particle attribute grid I/O.
+
+### Minimal Phase A Enable Block
+```ini
+BHAccretionMethod                = 1
+BHAccretionKernelRadius          = 3.0
+BHAccretionTSplitFloor           = 5.0e5
+BHAccretionColdModel             = 0
+BHAccretionCVisc                 = 6.283
+BHAccretionNHStar                = 0.1
+BHAccretionBeta                  = 1.0
+BHAccretionAlphaMax              = 10.0
+BHAccretionRadiativeEfficiency   = 0.1
+BHAccretionVerbose               = 1
+BHAccretionRunEveryTimestep      = 0
+```

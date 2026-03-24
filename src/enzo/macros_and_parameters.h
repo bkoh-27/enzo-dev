@@ -80,7 +80,7 @@
 
 #define MAX_REFINE_REGIONS               8000
 
-#define MAX_NUMBER_OF_PARTICLE_ATTRIBUTES  16
+#define MAX_NUMBER_OF_PARTICLE_ATTRIBUTES  20
 
 #define MAX_TIME_ACTIONS                   10
 

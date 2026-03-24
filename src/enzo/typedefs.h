@@ -322,7 +322,7 @@ const star_type
      1 = dynamical_time (LifeTime)
      2 = metallicity_fraction
      3 = typeia_fraction / MBH last_accretion_rate
-   Locked BH seeding v1.5 metadata slots (Phase 1 scaffolding):
+   Locked BH seeding + accretion metadata slots:
 #ifdef WINDS
      7 = BHSeedChannel
      8 = BHSeedRedshift
@@ -332,6 +332,11 @@ const star_type
     12 = BHSeedKernelComplete
     13 = BHSeedHostDMDensity
     14 = BHSeedAcceptRank
+    15 = BHAccretedMass
+    16 = BHReservoirMass
+    17 = BHLastAccretionRedshift
+    18 = BHLastEddingtonRatio
+    19 = BHFormationMass
 #else
      4 = BHSeedChannel
      5 = BHSeedRedshift
@@ -341,6 +346,11 @@ const star_type
      9 = BHSeedKernelComplete
     10 = BHSeedHostDMDensity
     11 = BHSeedAcceptRank
+    12 = BHAccretedMass
+    13 = BHReservoirMass
+    14 = BHLastAccretionRedshift
+    15 = BHLastEddingtonRatio
+    16 = BHFormationMass
 #endif
 */
 const int PARTICLE_ATTRIBUTE_CREATION_TIME          = 0;
@@ -356,6 +366,11 @@ const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK = 11;
 const int PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE = 12;
 const int PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY = 13;
 const int PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK     = 14;
+const int PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS    = 15;
+const int PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS   = 16;
+const int PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT    = 17;
+const int PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO   = 18;
+const int PARTICLE_ATTRIBUTE_BH_FORMATION_MASS        = 19;
 #else
 const int PARTICLE_ATTRIBUTE_BHSEED_CHANNEL         = 4;
 const int PARTICLE_ATTRIBUTE_BHSEED_REDSHIFT        = 5;
@@ -365,9 +380,19 @@ const int PARTICLE_ATTRIBUTE_BHSEED_PATCH_DENSITY_PEAK = 8;
 const int PARTICLE_ATTRIBUTE_BHSEED_KERNEL_COMPLETE = 9;
 const int PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY = 10;
 const int PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK     = 11;
+const int PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS    = 12;
+const int PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS   = 13;
+const int PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT    = 14;
+const int PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO   = 15;
+const int PARTICLE_ATTRIBUTE_BH_FORMATION_MASS        = 16;
 #endif
 const int PARTICLE_ATTRIBUTE_BHSEED_REQUIRED =
   PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK + 1;
+const int PARTICLE_ATTRIBUTE_BHACCR_REQUIRED =
+  PARTICLE_ATTRIBUTE_BH_FORMATION_MASS + 1;
+const int PARTICLE_ATTRIBUTE_BH_REQUIRED =
+  (PARTICLE_ATTRIBUTE_BHSEED_REQUIRED > PARTICLE_ATTRIBUTE_BHACCR_REQUIRED) ?
+  PARTICLE_ATTRIBUTE_BHSEED_REQUIRED : PARTICLE_ATTRIBUTE_BHACCR_REQUIRED;
 
 /* Define a float/int union. */
 
