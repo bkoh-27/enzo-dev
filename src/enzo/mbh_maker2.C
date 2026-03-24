@@ -36,7 +36,7 @@ int star_maker_bh_seed(int *nx, int *ny, int *nz, int *ibuff, int *imethod,
                        float *odthresh, float *metalthresh, float *tempthresh,
                        int *veldivcrit, int *thermalcrit, int *selfboundcrit,
                        int *requirefinestlevel, int *requirelocalpeak,
-                       int *ncand, int *cand_index, float *cand_density,
+                       int *ncand, int *maxcand, int *cand_index, float *cand_density,
                        int *diag);
 
 int BHSeedIsActive();
@@ -166,15 +166,11 @@ int mbh_maker2(grid *ThisGrid,
   int nz = ThisGrid->GridDimension[2];
   int size = nx*ny*nz;
 
-  /* Not OpenMP-safe; safe because star formation/BH seeding grid loop is serial. */
-  static std::vector<int> cand_index_scratch;
-  static std::vector<float> cand_density_scratch;
-  if (int(cand_index_scratch.size()) < size) {
-    cand_index_scratch.resize(size);
-    cand_density_scratch.resize(size);
-  }
+  std::vector<int> cand_index_scratch(max(1, size));
+  std::vector<float> cand_density_scratch(max(1, size));
   int *cand_index = &cand_index_scratch[0];
   float *cand_density = &cand_density_scratch[0];
+  int maxcand_local = size;
   int diag[8];
   int ncand_local = 0;
   int ibuff = NumberOfGhostZones;
@@ -194,7 +190,7 @@ int mbh_maker2(grid *ThisGrid,
                          &BHSeedVelDivCrit, &BHSeedThermalCrit,
                          &BHSeedSelfBoundCrit,
                          &BHSeedRequireFinestLevel, &BHSeedRequireLocalPeak,
-                         &ncand_local, cand_index,
+                         &ncand_local, &maxcand_local, cand_index,
                          cand_density, diag) == FAIL) {
     return FAIL;
   }
