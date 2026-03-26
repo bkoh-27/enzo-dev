@@ -1154,6 +1154,10 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHAccretionVerbose = %"ISYM, &BHAccretionVerbose);
     ret += sscanf(line, "BHAccretionRunEveryTimestep = %"ISYM,
 		  &BHAccretionRunEveryTimestep);
+    ret += sscanf(line, "BHAccretionIgnoredDVWarn = %"FSYM,
+		  &BHAccretionIgnoredDVWarn);
+    ret += sscanf(line, "BHAccretionIgnoredPFracWarn = %"FSYM,
+		  &BHAccretionIgnoredPFracWarn);
 
     ret += sscanf(line, "H2StarMakerEfficiency = %"FSYM,
 		  &H2StarMakerEfficiency);
@@ -2241,7 +2245,17 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
         BHAccretionRadiativeEfficiency >= 1.0f)
       ENZO_FAIL("BHAccretionRadiativeEfficiency must satisfy 0 < epsilon_r < 1.");
     if (BHAccretionColdModel != 0)
-      ENZO_FAIL("BHAccretionColdModel must be 0 in Phase A (AM-suppressed Bondi).");
+      ENZO_FAIL("BHAccretionColdModel must be 0 in Phase B (AM-suppressed Bondi).");
+  }
+  if (BHAccretionIgnoredDVWarn < 0.0f) {
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr, "WARNING BHAccretionIgnoredDVWarn < 0; clamping to 0 km/s.\n");
+    BHAccretionIgnoredDVWarn = 0.0f;
+  }
+  if (BHAccretionIgnoredPFracWarn < 0.0f) {
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr, "WARNING BHAccretionIgnoredPFracWarn < 0; clamping to 0.\n");
+    BHAccretionIgnoredPFracWarn = 0.0f;
   }
   if (BHAccretionRunEveryTimestep != 0 && BHAccretionRunEveryTimestep != 1)
     ENZO_FAIL("BHAccretionRunEveryTimestep must be 0 or 1.");

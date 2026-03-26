@@ -546,3 +546,91 @@ BHAccretionRadiativeEfficiency   = 0.1
 BHAccretionVerbose               = 1
 BHAccretionRunEveryTimestep      = 0
 ```
+
+## BH Accretion Phase B (Active Gas Removal + BH Growth)
+Phase B keeps the full Phase A diagnostic pass and then activates physical accretion.
+
+What Phase B adds:
+- converts capped diagnostic rates into requested removal mass (`dm_requested`),
+- evaluates a removal kernel (`BHAccretionRemovalRadius` in cell-width units),
+- removes gas from active-zone cells only (deterministic spherical k-j-i loop),
+- applies proportional multi-cell removal with residual balancing,
+- updates BH particle mass by the actually removed gas (`dm_removed`),
+- updates cumulative BH accretion metadata (`BHAccretedMass`, `BHLastAccretionRedshift`),
+- marks every cell with `dm_i > 0` in the transient SF mask,
+- computes/logs momentum-omission diagnostics and optional warnings,
+- skips same-pass accretion for newly seeded BHs (particles with temporary `INT_UNDEFINED` id).
+
+What Phase B still does **not** do:
+- BH velocity update from accretion momentum (diagnostics only),
+- reservoir drainage,
+- super-Eddington accretion mode,
+- torque-limited cold channel,
+- feedback coupling.
+
+### Accretion Parameters (Phase B Active Set)
+| Parameter | Default | Phase B status |
+| --- | --- | --- |
+| `BHAccretionMethod` | `1` | active (`0` off, `1` two-channel) |
+| `BHAccretionKernelRadius` | `3.0` | active (diagnostic kernel, physical kpc) |
+| `BHAccretionRemovalRadius` | `1` | active (removal kernel radius in cell widths) |
+| `BHAccretionRemovalMode` | `0` | active (`0` multi-cell, `1` single-cell debug) |
+| `BHAccretionTSplitFloor` | `5e5` | active |
+| `BHAccretionColdModel` | `0` | active (AM-suppressed Bondi) |
+| `BHAccretionCVisc` | `6.283` | active |
+| `BHAccretionNHStar` | `0.1` | active |
+| `BHAccretionBeta` | `1.0` | active |
+| `BHAccretionAlphaMax` | `10.0` | active |
+| `BHAccretionRadiativeEfficiency` | `0.1` | active |
+| `BHAccretionIgnoredDVWarn` | `1.0` | active warning threshold (km/s) |
+| `BHAccretionIgnoredPFracWarn` | `0.01` | active warning threshold (dimensionless) |
+| `BHAccretionVerbose` | `1` | active |
+| `BHAccretionRunEveryTimestep` | `0` | active cadence control |
+| `BHAccretionSuperEddington` | `0` | reserved (Phase C) |
+| `BHAccretionSuperEddFactor` | `1.0` | reserved (Phase C) |
+| `BHAccretionUseReservoir` | `0` | reserved (v2) |
+
+### Phase B Bookkeeping Tiers
+- Tier 1 (raw): `Mdot_hot_raw`, `Mdot_cold_raw`, `Mdot_total_raw`.
+- Tier 2 (capped): Eddington downscale via `frac_cap`, producing `dm_requested`.
+- Tier 3 (gas-limited): removal-kernel availability via `frac_gas`, producing `dm_removed`.
+
+Key realized invariants:
+- `Mdot_hot_realized + Mdot_cold_realized = dm_removed / dt`.
+- `BH_mass_new = BH_mass_old + dm_removed`.
+- `BH_mass_current = BHFormationMass + BHAccretedMass` (metadata check).
+
+### New Phase B `[BHACCR]` Fields
+Phase B appends:
+- `dm_requested`, `dm_removed`, `dm_removed_msun`,
+- `frac_cap`, `frac_gas`, `removal_gas_limited`,
+- `Mdot_hot_realized`, `Mdot_cold_realized`,
+- `bh_mass_new`,
+- `removal_cells`, `n_sf_blocked_cells`,
+- `acc_ignored_dv_kms`, `acc_ignored_p_frac`, `acc_momentum_warn`,
+- `accretion_wall_ms`.
+
+### Phase B Warning Lines (`[BHACCR_WARN]`)
+- gas-limited removal (`removal_gas_limited=1`),
+- momentum-omission warning when
+  - `acc_ignored_dv_kms > BHAccretionIgnoredDVWarn` or
+  - `acc_ignored_p_frac > BHAccretionIgnoredPFracWarn`.
+
+### Minimal Phase B Enable Block
+```ini
+BHAccretionMethod                = 1
+BHAccretionKernelRadius          = 3.0
+BHAccretionRemovalRadius         = 1
+BHAccretionRemovalMode           = 0
+BHAccretionTSplitFloor           = 5.0e5
+BHAccretionColdModel             = 0
+BHAccretionCVisc                 = 6.283
+BHAccretionNHStar                = 0.1
+BHAccretionBeta                  = 1.0
+BHAccretionAlphaMax              = 10.0
+BHAccretionRadiativeEfficiency   = 0.1
+BHAccretionIgnoredDVWarn         = 1.0
+BHAccretionIgnoredPFracWarn      = 0.01
+BHAccretionVerbose               = 1
+BHAccretionRunEveryTimestep      = 0
+```

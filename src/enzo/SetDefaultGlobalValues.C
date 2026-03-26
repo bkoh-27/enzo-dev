@@ -771,7 +771,7 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
 
   BHAccretionMethod                = 1;      // Phase A diagnostics on
   BHAccretionKernelRadius          = 3.0;    // physical kpc
-  BHAccretionRemovalRadius         = 1;      // reserved for Phase B
+  BHAccretionRemovalRadius         = 1;      // Phase B active (cell widths)
   BHAccretionTSplitFloor           = 5.0e5;  // K
   BHAccretionColdModel             = 0;      // AM-suppressed Bondi
   BHAccretionCVisc                 = 6.283;  // 2*pi
@@ -782,9 +782,11 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHAccretionSuperEddington        = 0;      // reserved for Phase C
   BHAccretionSuperEddFactor        = 1.0;    // reserved for Phase C
   BHAccretionUseReservoir          = 0;      // reserved for v2
-  BHAccretionRemovalMode           = 0;      // reserved for Phase B
+  BHAccretionRemovalMode           = 0;      // Phase B active
   BHAccretionVerbose               = 1;
   BHAccretionRunEveryTimestep      = FALSE;
+  BHAccretionIgnoredDVWarn         = 1.0;    // km/s
+  BHAccretionIgnoredPFracWarn      = 0.01;   // dimensionless
 
   H2StarMakerEfficiency = 0.01;
   H2StarMakerNumberDensityThreshold = 0.0;

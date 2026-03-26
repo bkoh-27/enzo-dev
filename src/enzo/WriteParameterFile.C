@@ -1118,6 +1118,10 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHAccretionUseReservoir     = %"ISYM"\n", BHAccretionUseReservoir);
   fprintf(fptr, "BHAccretionRemovalMode      = %"ISYM"\n", BHAccretionRemovalMode);
   fprintf(fptr, "BHAccretionVerbose          = %"ISYM"\n", BHAccretionVerbose);
+  fprintf(fptr, "BHAccretionIgnoredDVWarn    = %"GOUTSYM"  # km/s\n",
+          BHAccretionIgnoredDVWarn);
+  fprintf(fptr, "BHAccretionIgnoredPFracWarn = %"GOUTSYM"\n",
+          BHAccretionIgnoredPFracWarn);
   fprintf(fptr, "BHAccretionRunEveryTimestep = %"ISYM"\n\n",
           BHAccretionRunEveryTimestep);
 
