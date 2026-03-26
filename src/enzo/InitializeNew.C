@@ -331,14 +331,22 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
     NumberOfParticleAttributes = 4;
   }
 
-  if (BHSeedingMethod &&
-      NumberOfParticleAttributes < PARTICLE_ATTRIBUTE_BHSEED_REQUIRED) {
+  int required_bh_attributes = 0;
+  if (BHSeedingMethod)
+    required_bh_attributes = max(required_bh_attributes,
+                                 PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
+  if (BHAccretionMethod)
+    required_bh_attributes = max(required_bh_attributes,
+                                 PARTICLE_ATTRIBUTE_BHACCR_REQUIRED);
+
+  if (required_bh_attributes > 0 &&
+      NumberOfParticleAttributes < required_bh_attributes) {
     if (MyProcessorNumber == ROOT_PROCESSOR)
-      fprintf(stderr, "INFO [BHSEED_ATTR]: BHSeedingMethod=%"ISYM" requires "
-              "NumberOfParticleAttributes>=%"ISYM"; increasing %"ISYM" -> %"ISYM".\n",
-              BHSeedingMethod, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED,
-              NumberOfParticleAttributes, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
-    NumberOfParticleAttributes = PARTICLE_ATTRIBUTE_BHSEED_REQUIRED;
+      fprintf(stderr, "INFO [BH_ATTR]: BHSeedingMethod=%"ISYM" BHAccretionMethod=%"ISYM" "
+              "requires NumberOfParticleAttributes>=%"ISYM"; increasing %"ISYM" -> %"ISYM".\n",
+              BHSeedingMethod, BHAccretionMethod, required_bh_attributes,
+              NumberOfParticleAttributes, required_bh_attributes);
+    NumberOfParticleAttributes = required_bh_attributes;
   }
 
   // Give unset parameters their default values

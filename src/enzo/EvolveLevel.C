@@ -714,6 +714,12 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
 
     for (grid1 = 0; grid1 < NumberOfGrids; grid1++) {
 
+      if (BHAccretionMethod)
+        if (Grids[grid1]->GridData->BHAccretionDiagnosticHandler
+            (Grids[grid1]->NextGridNextLevel, level,
+             MetaData->CycleNumber + 1, dtLevelAbove) == FAIL)
+          ENZO_FAIL("Error in BHAccretionDiagnosticHandler.");
+
       /* Include 'star' particle creation and feedback. */
 
       Grids[grid1]->GridData->StarParticleHandler

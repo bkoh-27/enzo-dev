@@ -1101,6 +1101,26 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHSeedDeterministicTiebreak = %"ISYM"\n\n",
           BHSeedDeterministicTiebreak);
 
+  fprintf(fptr, "BHAccretionMethod           = %"ISYM"\n", BHAccretionMethod);
+  fprintf(fptr, "BHAccretionKernelRadius     = %"GOUTSYM"  # physical kpc\n",
+          BHAccretionKernelRadius);
+  fprintf(fptr, "BHAccretionRemovalRadius    = %"ISYM"\n", BHAccretionRemovalRadius);
+  fprintf(fptr, "BHAccretionTSplitFloor      = %"GOUTSYM"\n", BHAccretionTSplitFloor);
+  fprintf(fptr, "BHAccretionColdModel        = %"ISYM"\n", BHAccretionColdModel);
+  fprintf(fptr, "BHAccretionCVisc            = %"GOUTSYM"\n", BHAccretionCVisc);
+  fprintf(fptr, "BHAccretionNHStar           = %"GOUTSYM"\n", BHAccretionNHStar);
+  fprintf(fptr, "BHAccretionBeta             = %"GOUTSYM"\n", BHAccretionBeta);
+  fprintf(fptr, "BHAccretionAlphaMax         = %"GOUTSYM"\n", BHAccretionAlphaMax);
+  fprintf(fptr, "BHAccretionRadiativeEfficiency = %"GOUTSYM"\n",
+          BHAccretionRadiativeEfficiency);
+  fprintf(fptr, "BHAccretionSuperEddington   = %"ISYM"\n", BHAccretionSuperEddington);
+  fprintf(fptr, "BHAccretionSuperEddFactor   = %"GOUTSYM"\n", BHAccretionSuperEddFactor);
+  fprintf(fptr, "BHAccretionUseReservoir     = %"ISYM"\n", BHAccretionUseReservoir);
+  fprintf(fptr, "BHAccretionRemovalMode      = %"ISYM"\n", BHAccretionRemovalMode);
+  fprintf(fptr, "BHAccretionVerbose          = %"ISYM"\n", BHAccretionVerbose);
+  fprintf(fptr, "BHAccretionRunEveryTimestep = %"ISYM"\n\n",
+          BHAccretionRunEveryTimestep);
+
   fprintf(fptr, "MBHParticleIO                         = %"ISYM"\n",
 	  MBHParticleIO);
   if (MBHParticleIOFilename != NULL)

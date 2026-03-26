@@ -1140,6 +1140,24 @@ EXTERN int   BHSeedRankingOrder;                 // Phase 3+: not yet active
 EXTERN int   BHSeedVerbose;                      // Phase 1 active (log detail)
 EXTERN int   BHSeedDeterministicTiebreak;        // Phase 3+: not yet active
 
+/* BH accretion diagnostics (Phase A) */
+EXTERN int   BHAccretionMethod;                  // 0=off, 1=two-channel diagnostics
+EXTERN float BHAccretionKernelRadius;            // physical kpc
+EXTERN int   BHAccretionRemovalRadius;           // reserved for Phase B (cell widths)
+EXTERN float BHAccretionTSplitFloor;             // K
+EXTERN int   BHAccretionColdModel;               // 0=AM-suppressed Bondi
+EXTERN float BHAccretionCVisc;                   // AM suppression parameter
+EXTERN float BHAccretionNHStar;                  // cm^-3 boost threshold
+EXTERN float BHAccretionBeta;                    // boost slope
+EXTERN float BHAccretionAlphaMax;                // max hot boost
+EXTERN float BHAccretionRadiativeEfficiency;     // epsilon_r for Eddington rate
+EXTERN int   BHAccretionSuperEddington;          // reserved for Phase C
+EXTERN float BHAccretionSuperEddFactor;          // reserved for Phase C
+EXTERN int   BHAccretionUseReservoir;            // reserved for v2
+EXTERN int   BHAccretionRemovalMode;             // reserved for Phase B
+EXTERN int   BHAccretionVerbose;                 // logging verbosity
+EXTERN int   BHAccretionRunEveryTimestep;        // 0=finest-only-like cadence
+
 /* Star Class Radiation Particle IO (PARTICLE_TYPE_RAD) */
 EXTERN char *RadiationSourcesFileName;
 EXTERN int   NumberOfRadiationParticles;

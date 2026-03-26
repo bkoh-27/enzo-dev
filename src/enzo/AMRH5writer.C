@@ -66,15 +66,20 @@ void AMRHDF5Writer::AMRHDF5Create( const char*      fileName,
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
-     "particle_attribute_14", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "particle_attribute_17", "particle_attribute_18",
+     "particle_attribute_19"};
 #endif
 
   int i;
@@ -448,15 +453,20 @@ herr_t AMRHDF5Writer::writeParticles ( const int nPart,
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
-     "particle_attribute_14", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "particle_attribute_17", "particle_attribute_18",
+     "particle_attribute_19"};
 #endif
 
   sprintf(gridDataName, "/grid-%d", gridId);
@@ -624,15 +634,20 @@ herr_t AMRHDF5Writer::writeParticles2( const int nPart,
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
-     "particle_attribute_14", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "particle_attribute_17", "particle_attribute_18",
+     "particle_attribute_19"};
 #endif
 
   /* if there's no particle, don't bother,
@@ -880,15 +895,20 @@ void AMRHDF5Writer::AMRHDF5CreateSeparateParticles( const char*      fileName,
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
-     "particle_attribute_14", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "particle_attribute_17", "particle_attribute_18",
+     "particle_attribute_19"};
 #endif
 
   int i;
@@ -987,15 +1007,20 @@ herr_t AMRHDF5Writer::writeSeparateParticles ( const int nPart,
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
      "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
      "bhseed_patch_metallicity", "bhseed_patch_density_peak",
      "bhseed_kernel_complete", "bhseed_host_dm_density",
-     "bhseed_accept_rank", "particle_attribute_12", "particle_attribute_13",
-     "particle_attribute_14", "particle_attribute_15"};
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "particle_attribute_17", "particle_attribute_18",
+     "particle_attribute_19"};
 #endif
 
   if (nPart == 0) 

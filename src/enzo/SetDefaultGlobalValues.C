@@ -769,6 +769,23 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHSeedVerbose                    = 1;
   BHSeedDeterministicTiebreak      = TRUE;   // Phase 3+: not yet active
 
+  BHAccretionMethod                = 1;      // Phase A diagnostics on
+  BHAccretionKernelRadius          = 3.0;    // physical kpc
+  BHAccretionRemovalRadius         = 1;      // reserved for Phase B
+  BHAccretionTSplitFloor           = 5.0e5;  // K
+  BHAccretionColdModel             = 0;      // AM-suppressed Bondi
+  BHAccretionCVisc                 = 6.283;  // 2*pi
+  BHAccretionNHStar                = 0.1;    // cm^-3
+  BHAccretionBeta                  = 1.0;
+  BHAccretionAlphaMax              = 10.0;
+  BHAccretionRadiativeEfficiency   = 0.1;
+  BHAccretionSuperEddington        = 0;      // reserved for Phase C
+  BHAccretionSuperEddFactor        = 1.0;    // reserved for Phase C
+  BHAccretionUseReservoir          = 0;      // reserved for v2
+  BHAccretionRemovalMode           = 0;      // reserved for Phase B
+  BHAccretionVerbose               = 1;
+  BHAccretionRunEveryTimestep      = FALSE;
+
   H2StarMakerEfficiency = 0.01;
   H2StarMakerNumberDensityThreshold = 0.0;
   H2StarMakerMinimumMass = 0.0;
