@@ -1062,6 +1062,8 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY] = cand.host_dm_density;
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK)
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = float(cand.accept_rank);
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(p.Mass);
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;

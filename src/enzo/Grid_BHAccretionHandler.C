@@ -277,6 +277,13 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
       continue;
 
+    FLOAT bh_pos[MAX_DIMENSION];
+    bh_pos[0] = ParticlePosition[0][p];
+    bh_pos[1] = (GridRank > 1) ? ParticlePosition[1][p] : 0.0;
+    bh_pos[2] = (GridRank > 2) ? ParticlePosition[2][p] : 0.0;
+    if (!this->PointInGrid(bh_pos))
+      continue;
+
     const double bh_mass_msun = bh_mass_code * mass_to_msun;
     const double bh_vel_x = ParticleVelocity[0][p];
     const double bh_vel_y = (GridRank > 1) ? ParticleVelocity[1][p] : 0.0;
@@ -778,14 +785,14 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS) {
       float &v = ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
       if (!isfinite(v) || v <= 0.0f)
-        v = float(bh_mass_msun);
+        v = float(bh_mass_code);
     }
 
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS) {
       float &v = ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
       if (!isfinite(v) || v < 0.0f)
         v = 0.0f;
-      v += float(dm_removed_msun);
+      v += float(dm_removed_total);
     }
 
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT) {
@@ -806,14 +813,41 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS &&
         NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS) {
-      const double formation_msun =
+      const double formation_mass_code =
         ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
-      const double accreted_msun =
+      const double accreted_mass_code =
         ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
-      const double invariant_rhs = formation_msun + accreted_msun;
-      const double invariant_tol = 1.0e-4 * max(1.0, max(fabs(bh_mass_new_msun), fabs(invariant_rhs)));
-      if (fabs(bh_mass_new_msun - invariant_rhs) > invariant_tol)
+      const double invariant_rhs = formation_mass_code + accreted_mass_code;
+      const double invariant_tol = 1.0e-8 *
+        max(1.0, max(fabs(bh_mass_new_code), fabs(invariant_rhs)));
+      if (fabs(bh_mass_new_code - invariant_rhs) > invariant_tol)
         ENZO_FAIL("BHAccretion invariant failed: BH mass != BHFormationMass + BHAccretedMass.");
+    }
+
+    if (BHAccretionVerbose >= 1) {
+      fprintf(logptr,
+              "[BHACCR_DEBUG] step=%d level=%d bh_id=%lld "
+              "Mdot_total_capped=%.15e dm_requested=%.15e "
+              "removal_kernel_gas=%.15e dm_removed=%.15e\n",
+              cycle_number, level, (long long) ParticleNumber[p],
+              mdot_total_capped, dm_requested, removal_kernel_gas, dm_removed_total);
+
+      if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS &&
+          NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS) {
+        const double formation_mass_code =
+          ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
+        const double accreted_mass_code =
+          ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
+        const double mass_sum = formation_mass_code + accreted_mass_code;
+        const double mass_diff = bh_mass_new_code - mass_sum;
+        fprintf(logptr,
+                "[BHACCR_DEBUG] step=%d level=%d bh_id=%lld "
+                "bh_mass_code=%.15e formation_mass_code=%.15e "
+                "accreted_mass_code=%.15e sum=%.15e diff=%.15e\n",
+                cycle_number, level, (long long) ParticleNumber[p],
+                bh_mass_new_code, formation_mass_code, accreted_mass_code,
+                mass_sum, mass_diff);
+      }
     }
 
     const double delta_p_mag = sqrt(delta_px*delta_px + delta_py*delta_py + delta_pz*delta_pz);
