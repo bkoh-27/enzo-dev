@@ -806,9 +806,11 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO)
       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO][p] = float(f_edd);
 
+    const double mass_update_rhs = bh_mass_code + dm_removed_total;
+    const double mass_update_scale = max(fabs(bh_mass_new_code), fabs(mass_update_rhs));
     const double mass_invariant_tol =
-      1.0e-10 * max(1.0, max(fabs(bh_mass_new_code), fabs(bh_mass_code + dm_removed_total)));
-    if (fabs(bh_mass_new_code - (bh_mass_code + dm_removed_total)) > mass_invariant_tol)
+      (mass_update_scale > 0.0) ? 1.0e-10 * mass_update_scale : 1.0e-30;
+    if (fabs(bh_mass_new_code - mass_update_rhs) > mass_invariant_tol)
       ENZO_FAIL("BHAccretion invariant failed: BH mass update mismatch.");
 
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS &&
@@ -818,8 +820,8 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       const double accreted_mass_code =
         ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
       const double invariant_rhs = formation_mass_code + accreted_mass_code;
-      const double invariant_tol = 1.0e-8 *
-        max(1.0, max(fabs(bh_mass_new_code), fabs(invariant_rhs)));
+      const double mass_scale = max(fabs(bh_mass_new_code), fabs(invariant_rhs));
+      const double invariant_tol = (mass_scale > 0.0) ? 1.0e-8 * mass_scale : 1.0e-30;
       if (fabs(bh_mass_new_code - invariant_rhs) > invariant_tol)
         ENZO_FAIL("BHAccretion invariant failed: BH mass != BHFormationMass + BHAccretedMass.");
     }
