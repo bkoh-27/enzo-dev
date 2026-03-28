@@ -634,3 +634,57 @@ BHAccretionIgnoredPFracWarn      = 0.01
 BHAccretionVerbose               = 1
 BHAccretionRunEveryTimestep      = 0
 ```
+
+## BH Reposition Phase A (Diagnostics Only)
+Phase A adds a read-only BH repositioning diagnostic pass between seeding finalize
+and accretion on each level update:
+
+`BHSeedFinalizeLevel -> BHRepositionDiagnosticHandler -> BHAccretionDiagnosticHandler`
+
+What Phase A does:
+- finds BH particles using the same type filter, deterministic ID ordering, and ownership gate as accretion,
+- skips newly seeded (`INT_UNDEFINED`) BHs with explicit sentinel logging,
+- scans a spherical search kernel (`BHRepositionSearchRadius`, physical kpc),
+- tracks two density peaks in one deterministic k-j-i traversal:
+  - diagnostic peak over active + ghost cells,
+  - active-zone peak over active cells only,
+- optionally computes offset to a local potential minimum when enabled and available,
+- logs one `[BHREPOS]` line per processed BH.
+
+What Phase A does **not** do:
+- move BH positions,
+- modify BH velocities,
+- write any baryon or potential fields.
+
+### Reposition Parameters (Phase A)
+| Parameter | Default | Phase A status |
+| --- | --- | --- |
+| `BHRepositionMethod` | `0` | parsed/written; diagnostics still run for all values |
+| `BHRepositionSearchRadius` | `3.0` | active (physical kpc) |
+| `BHRepositionMaxDisplacement` | `0.5` | parsed/validated only (Phase B use) |
+| `BHRepositionDiagnosePotential` | `0` | active optional diagnostic |
+| `BHRepositionVerbose` | `1` | active warning verbosity |
+
+Runtime validation:
+- hard errors:
+  - `BHRepositionMethod` not in `{0,1,2}`,
+  - `BHRepositionSearchRadius <= 0`,
+  - `BHRepositionMaxDisplacement < 0`.
+- warnings:
+  - under-resolved kernel (`search_radius/dx < 1.5`),
+  - kernel wider than nominal ghost support (`search_radius/dx > 3`),
+  - `BHRepositionMaxDisplacement` larger than kernel radius in cell widths,
+  - potential diagnostic requested but potential field unavailable (logged once per level pass).
+
+### `[BHREPOS]` Log Fields
+Each line reports:
+- BH id, redshift, BH position, and host-cell density,
+- diagnostic peak position/density, ghost flag, and BH-to-peak offset,
+- active-zone peak position/density and offset,
+- `active_target_exists`,
+- optional potential-min offset (`-1` when unavailable/disabled),
+- displacement fields (`0` in Phase A),
+- `reposition_occurred=0`, `reposition_clamped=0`,
+- `newly_seeded_skip`,
+- kernel cell counts (`search_cells`, `search_active_cells`),
+- `reposition_wall_ms`.

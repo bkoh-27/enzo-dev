@@ -1101,6 +1101,15 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHSeedDeterministicTiebreak = %"ISYM"\n\n",
           BHSeedDeterministicTiebreak);
 
+  fprintf(fptr, "BHRepositionMethod          = %"ISYM"\n", BHRepositionMethod);
+  fprintf(fptr, "BHRepositionSearchRadius    = %"GOUTSYM"  # physical kpc\n",
+          BHRepositionSearchRadius);
+  fprintf(fptr, "BHRepositionMaxDisplacement = %"GOUTSYM"\n",
+          BHRepositionMaxDisplacement);
+  fprintf(fptr, "BHRepositionDiagnosePotential = %"ISYM"\n",
+          BHRepositionDiagnosePotential);
+  fprintf(fptr, "BHRepositionVerbose         = %"ISYM"\n\n", BHRepositionVerbose);
+
   fprintf(fptr, "BHAccretionMethod           = %"ISYM"\n", BHAccretionMethod);
   fprintf(fptr, "BHAccretionKernelRadius     = %"GOUTSYM"  # physical kpc\n",
           BHAccretionKernelRadius);

@@ -769,6 +769,12 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHSeedVerbose                    = 1;
   BHSeedDeterministicTiebreak      = TRUE;   // Phase 3+: not yet active
 
+  BHRepositionMethod               = 0;      // Phase A diagnostics-only scaffold
+  BHRepositionSearchRadius         = 3.0;    // physical kpc
+  BHRepositionMaxDisplacement      = 0.5;    // parsed for Phase B (cell widths)
+  BHRepositionDiagnosePotential    = 0;      // optional potential-min offset
+  BHRepositionVerbose              = 1;
+
   BHAccretionMethod                = 1;      // Phase A diagnostics on
   BHAccretionKernelRadius          = 3.0;    // physical kpc
   BHAccretionRemovalRadius         = 1;      // Phase B active (cell widths)

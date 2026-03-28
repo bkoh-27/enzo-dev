@@ -1140,6 +1140,13 @@ EXTERN int   BHSeedRankingOrder;                 // Phase 3+: not yet active
 EXTERN int   BHSeedVerbose;                      // Phase 1 active (log detail)
 EXTERN int   BHSeedDeterministicTiebreak;        // Phase 3+: not yet active
 
+/* BH reposition diagnostics (Phase A) */
+EXTERN int   BHRepositionMethod;                 // 0=diagnostics-only scaffold
+EXTERN float BHRepositionSearchRadius;           // physical kpc
+EXTERN float BHRepositionMaxDisplacement;        // parsed for Phase B (cell widths)
+EXTERN int   BHRepositionDiagnosePotential;      // optional potential-min offset
+EXTERN int   BHRepositionVerbose;                // logging verbosity
+
 /* BH accretion diagnostics (Phase A) */
 EXTERN int   BHAccretionMethod;                  // 0=off, 1=two-channel diagnostics
 EXTERN float BHAccretionKernelRadius;            // physical kpc

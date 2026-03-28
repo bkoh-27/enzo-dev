@@ -1129,6 +1129,15 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHSeedDeterministicTiebreak = %"ISYM,
 		  &BHSeedDeterministicTiebreak);
 
+    ret += sscanf(line, "BHRepositionMethod = %"ISYM, &BHRepositionMethod);
+    ret += sscanf(line, "BHRepositionSearchRadius = %"FSYM,
+                  &BHRepositionSearchRadius);
+    ret += sscanf(line, "BHRepositionMaxDisplacement = %"FSYM,
+                  &BHRepositionMaxDisplacement);
+    ret += sscanf(line, "BHRepositionDiagnosePotential = %"ISYM,
+                  &BHRepositionDiagnosePotential);
+    ret += sscanf(line, "BHRepositionVerbose = %"ISYM, &BHRepositionVerbose);
+
     ret += sscanf(line, "BHAccretionMethod = %"ISYM, &BHAccretionMethod);
     ret += sscanf(line, "BHAccretionKernelRadius = %"FSYM,
 		  &BHAccretionKernelRadius);
@@ -2232,6 +2241,15 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
               "cells at BHSeedOverdensityThreshold may not have enough gas. "
               "Monitor ngates_mass in [BHSEED] log.\n", BHSeedMass);
   }
+
+  if (BHRepositionMethod < 0 || BHRepositionMethod > 2)
+    ENZO_FAIL("BHRepositionMethod must be 0 (diagnostics scaffold), 1 (rate-limited drift), or 2 (teleport debug).");
+  if (BHRepositionSearchRadius <= 0.0f)
+    ENZO_FAIL("BHRepositionSearchRadius must be positive (units: physical kpc).");
+  if (BHRepositionMaxDisplacement < 0.0f)
+    ENZO_FAIL("BHRepositionMaxDisplacement must be non-negative (units: cell widths).");
+  if (BHRepositionDiagnosePotential != 0 && BHRepositionDiagnosePotential != 1)
+    ENZO_FAIL("BHRepositionDiagnosePotential must be 0 or 1.");
 
   if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
     ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics).");
