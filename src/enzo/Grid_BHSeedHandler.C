@@ -991,7 +991,8 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
 
   p.Type = PARTICLE_TYPE_MBH;
   p.Number = INT_UNDEFINED;
-  p.Mass = bh_mass_code;
+  /* AddOneParticleFromList divides List.Mass by cell volume; pre-scale to store mass. */
+  p.Mass = bh_mass_code * cell_volume_code;
 
   if (BHSeedVerbose >= 2) {
     const double mom_x_particle = double(p.Mass) * double(p.Velocity[0]);
@@ -1063,7 +1064,7 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK)
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = float(cand.accept_rank);
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS)
-    p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(p.Mass);
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(bh_mass_code);
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;
