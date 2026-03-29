@@ -991,7 +991,9 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
 
   p.Type = PARTICLE_TYPE_MBH;
   p.Number = INT_UNDEFINED;
-  /* AddOneParticleFromList divides List.Mass by cell volume; pre-scale to store mass. */
+  /* NOTE (carried forward from accretion Phase B fix 01e1594b):
+     AddOneParticleFromList divides List.Mass by cell volume, so seed mass
+     must be pre-scaled by cell_volume_code here to preserve intended code mass. */
   p.Mass = bh_mass_code * cell_volume_code;
 
   if (BHSeedVerbose >= 2) {
@@ -1063,6 +1065,9 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_HOST_DM_DENSITY] = cand.host_dm_density;
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK)
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = float(cand.accept_rank);
+  /* NOTE (carried forward from accretion Phase B fix 01e1594b):
+     Store BH formation mass at seeding so accretion can enforce cumulative
+     mass bookkeeping BH_mass = BHFormationMass + BHAccretedMass. */
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS)
     p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(bh_mass_code);
 

@@ -714,10 +714,11 @@ int EvolveLevel(TopGridData *MetaData, LevelHierarchyEntry *LevelArray[],
 
     for (grid1 = 0; grid1 < NumberOfGrids; grid1++) {
 
-      if (Grids[grid1]->GridData->BHRepositionDiagnosticHandler
-          (Grids[grid1]->NextGridNextLevel, level,
-           MetaData->CycleNumber + 1, dtLevelAbove) == FAIL)
-        ENZO_FAIL("Error in BHRepositionDiagnosticHandler.");
+      if (BHRepositionMethod > 0 || BHRepositionVerbose > 0)
+        if (Grids[grid1]->GridData->BHRepositionDiagnosticHandler
+            (Grids[grid1]->NextGridNextLevel, level,
+             MetaData->CycleNumber + 1, dtLevelAbove) == FAIL)
+          ENZO_FAIL("Error in BHRepositionDiagnosticHandler.");
 
       if (BHAccretionMethod)
         if (Grids[grid1]->GridData->BHAccretionDiagnosticHandler
