@@ -1168,6 +1168,23 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ret += sscanf(line, "BHAccretionIgnoredPFracWarn = %"FSYM,
 		  &BHAccretionIgnoredPFracWarn);
 
+    ret += sscanf(line, "BHFeedbackMethod = %"ISYM, &BHFeedbackMethod);
+    ret += sscanf(line, "BHFeedbackModeThreshold = %"FSYM,
+                  &BHFeedbackModeThreshold);
+    ret += sscanf(line, "BHFeedbackKernelRadius = %"FSYM,
+                  &BHFeedbackKernelRadius);
+    ret += sscanf(line, "BHFeedbackThermalEfficiency = %"FSYM,
+                  &BHFeedbackThermalEfficiency);
+    ret += sscanf(line, "BHFeedbackMinEnergyBurst = %lf",
+                  &BHFeedbackMinEnergyBurst);
+    ret += sscanf(line, "BHFeedbackKineticEfficiency = %"FSYM,
+                  &BHFeedbackKineticEfficiency);
+    ret += sscanf(line, "BHFeedbackWindVelocity = %"FSYM,
+                  &BHFeedbackWindVelocity);
+    ret += sscanf(line, "BHFeedbackKineticGeometry = %"ISYM,
+                  &BHFeedbackKineticGeometry);
+    ret += sscanf(line, "BHFeedbackVerbose = %"ISYM, &BHFeedbackVerbose);
+
     ret += sscanf(line, "H2StarMakerEfficiency = %"FSYM,
 		  &H2StarMakerEfficiency);
     ret += sscanf(line, "H2StarMakerNumberDensityThreshold = %"FSYM,
@@ -2277,6 +2294,23 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   }
   if (BHAccretionRunEveryTimestep != 0 && BHAccretionRunEveryTimestep != 1)
     ENZO_FAIL("BHAccretionRunEveryTimestep must be 0 or 1.");
+
+  if (BHFeedbackMethod < 0 || BHFeedbackMethod > 2)
+    ENZO_FAIL("BHFeedbackMethod must be 0 (off), 1 (thermal framework), or 2 (full two-mode scaffold).");
+  if (BHFeedbackKernelRadius <= 0.0f)
+    ENZO_FAIL("BHFeedbackKernelRadius must be positive (units: physical kpc).");
+  if (BHFeedbackThermalEfficiency < 0.0f || BHFeedbackThermalEfficiency > 1.0f)
+    ENZO_FAIL("BHFeedbackThermalEfficiency must satisfy 0 <= epsilon_f <= 1.");
+  if (BHFeedbackMinEnergyBurst <= 0.0f)
+    ENZO_FAIL("BHFeedbackMinEnergyBurst must be positive (erg).");
+  if (BHFeedbackKineticEfficiency < 0.0f)
+    ENZO_FAIL("BHFeedbackKineticEfficiency must be non-negative.");
+  if (BHFeedbackWindVelocity <= 0.0f)
+    ENZO_FAIL("BHFeedbackWindVelocity must be positive (km/s).");
+  if (BHFeedbackKineticGeometry != 0 && BHFeedbackKineticGeometry != 1)
+    ENZO_FAIL("BHFeedbackKineticGeometry must be 0 (isotropic) or 1 (bipolar v2 placeholder).");
+  if (BHFeedbackMethod == 2 && MyProcessorNumber == ROOT_PROCESSOR)
+    fprintf(stderr, "WARNING [BHFDBK]: BHFeedbackMethod=2 requested, but full two-mode active coupling requires Phase C. Running diagnostics-only scaffold.\n");
 
   /* Cosmic ray diffusion should be off if Cosmic rays are off */
   if(CRDiffusion > 0 && CRModel == 0){

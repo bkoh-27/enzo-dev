@@ -805,6 +805,8 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO)
       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO][p] = float(f_edd);
+    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL)
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL][p] = float(mdot_actual);
 
     const double mass_update_rhs = bh_mass_code + dm_removed_total;
     const double mass_update_scale = max(fabs(bh_mass_new_code), fabs(mass_update_rhs));

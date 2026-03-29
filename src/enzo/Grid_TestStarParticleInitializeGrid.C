@@ -71,6 +71,8 @@ int grid::TestStarParticleInitializeGrid(float TestStarParticleStarMass,
     required_attributes = max(required_attributes, PARTICLE_ATTRIBUTE_BHSEED_REQUIRED);
   if (BHAccretionMethod)
     required_attributes = max(required_attributes, PARTICLE_ATTRIBUTE_BHACCR_REQUIRED);
+  if (BHFeedbackMethod)
+    required_attributes = max(required_attributes, PARTICLE_ATTRIBUTE_BHFDBK_REQUIRED);
   NumberOfParticleAttributes = max(NumberOfParticleAttributes, required_attributes);
   this->AllocateNewParticles(NumberOfParticles);
   printf("Allocated %d particles\n", NumberOfParticles);

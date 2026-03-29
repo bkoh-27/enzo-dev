@@ -73,7 +73,15 @@ int grid::WriteGridX(FILE *fptr, char *base_name, int grid_id)
   char *ParticleVelocityLabel[] =
      {"particle_velocity_x", "particle_velocity_y", "particle_velocity_z"};
   char *ParticleAttributeLabel[] = {"creation_time", "dynamical_time",
-				    "metallicity_fraction", "particle_jet_x", "particle_jet_y", "particle_jet_z", "alpha_fraction"};
+				    "metallicity_fraction", "particle_jet_x", "particle_jet_y", "particle_jet_z", "typeia_fraction",
+				    "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
+				    "bhseed_patch_metallicity", "bhseed_patch_density_peak",
+				    "bhseed_kernel_complete", "bhseed_host_dm_density",
+				    "bhseed_accept_rank", "bhaccr_accreted_mass",
+				    "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+				    "bhaccr_last_eddington_ratio", "bh_formation_mass",
+				    "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+				    "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
   /*  char *ParticleAttributeLabel[] = {"creation_time", "dynamical_time",
       "metallicity_fraction", "alpha_fraction"};*/
 #ifdef IO_LOG

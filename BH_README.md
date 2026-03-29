@@ -696,3 +696,76 @@ Each line reports:
 - `newly_seeded_skip`,
 - kernel cell counts (`search_cells`, `search_active_cells`),
 - `reposition_wall_ms`.
+
+## BH Feedback Phase A (Diagnostics Only)
+Phase A adds a feedback diagnostics handler that runs after accretion and before
+star formation:
+
+`BHRepositionDiagnosticHandler -> BHAccretionDiagnosticHandler -> BHFeedbackHandler -> StarParticleHandler`
+
+What Phase A does:
+- reads realized accretion diagnostics from the current timestep (`f_Edd`,
+  `Mdot_actual`),
+- classifies mode (`THERMAL` when `f_Edd > BHFeedbackModeThreshold`,
+  otherwise `KINETIC`),
+- computes diagnostic thermal energy and kinetic momentum budgets,
+- computes diagnostic reservoir accumulation and would-be burst trigger,
+- evaluates feedback-kernel geometry/temperature diagnostics,
+- writes `[BHFDBK]` log lines.
+
+What Phase A does **not** do:
+- no thermal energy injection,
+- no kinetic momentum injection,
+- no baryon-field writes,
+- no SF mask writes from feedback,
+- no mutation of `BHFeedbackEnergyReservoir`,
+- no mutation of `BHLastFeedbackRedshift`.
+
+### Feedback Parameters (Phase A)
+| Parameter | Default | Phase A status |
+| --- | --- | --- |
+| `BHFeedbackMethod` | `0` | active (`0` off, `1` thermal framework diagnostics, `2` two-mode scaffold diagnostics) |
+| `BHFeedbackModeThreshold` | `0.01` | active |
+| `BHFeedbackKernelRadius` | `1.0` | active (physical kpc) |
+| `BHFeedbackThermalEfficiency` | `0.02` | active |
+| `BHFeedbackMinEnergyBurst` | `1e50` | active diagnostic threshold (erg) |
+| `BHFeedbackKineticEfficiency` | `0.1` | parsed (Phase C active) |
+| `BHFeedbackWindVelocity` | `1e4` | parsed (km/s, Phase C active) |
+| `BHFeedbackKineticGeometry` | `0` | parsed (Phase C active) |
+| `BHFeedbackVerbose` | `1` | active |
+
+Validation and warnings:
+- hard errors:
+  - `BHFeedbackMethod` not in `{0,1,2}`,
+  - `BHFeedbackKernelRadius <= 0`,
+  - `BHFeedbackThermalEfficiency` outside `[0,1]`,
+  - `BHFeedbackMinEnergyBurst <= 0`,
+  - `BHFeedbackKineticEfficiency < 0`,
+  - `BHFeedbackWindVelocity <= 0`,
+  - `BHFeedbackKineticGeometry` not in `{0,1}`.
+- warnings:
+  - `BHFeedbackMethod=2` reports that active two-mode deposition requires Phase C,
+  - under-resolved kernel (`kernel_radius/dx < 1.5`),
+  - kernel exceeding nominal ghost support (`kernel_radius/dx > 3`).
+
+### Feedback Metadata Attributes
+Phase A registers/checkpoints:
+- `BHFeedbackEnergyReservoir` (initialized to `0`, not mutated in Phase A),
+- `BHLastFeedbackRedshift` (initialized to `-1`, not mutated in Phase A).
+
+It also stores:
+- `BHLastMdotActual` (realized accretion rate from the accretion handler, code units).
+
+### `[BHFDBK]` Fields
+Each line reports:
+- `step`, `level`, `z`, `bh_id`, `bh_mass`,
+- `feedback_mode`, `f_Edd`, `L_feedback`,
+- `E_requested`, `reservoir_before`, `reservoir_after`, `burst_diag`,
+- `E_deposited` (always `0` in Phase A),
+- `p_requested`, `p_deposited` (always `0` in Phase A),
+- `feedback_kernel_cells`, `feedback_kernel_active_cells`,
+- `feedback_kernel_gas_msun`,
+- `T_before_mean`, `T_after_mean` (equal in Phase A),
+- `n_sf_blocked_feedback` (always `0` in Phase A),
+- `newly_seeded_skip`,
+- `feedback_wall_ms`.

@@ -697,6 +697,22 @@ int BHSeedCreateLocalBestParticle()
     /* Int semantic field stored in float slot; -1 means unresolved in Phase 1. */
     p.Attribute[PARTICLE_ATTRIBUTE_BHSEED_ACCEPT_RANK] = -1.0f; // Phase 3+
   }
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(bh_mass_code);
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT] = -1.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT] = -1.0f;
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;
@@ -1070,6 +1086,20 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
      mass bookkeeping BH_mass = BHFormationMass + BHAccretedMass. */
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS)
     p.Attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] = float(bh_mass_code);
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_RESERVOIR_MASS] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_REDSHIFT] = -1.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT] = -1.0f;
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;

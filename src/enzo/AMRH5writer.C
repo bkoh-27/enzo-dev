@@ -68,7 +68,9 @@ void AMRHDF5Writer::AMRHDF5Create( const char*      fileName,
      "bhseed_kernel_complete", "bhseed_host_dm_density",
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -78,8 +80,10 @@ void AMRHDF5Writer::AMRHDF5Create( const char*      fileName,
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "particle_attribute_17", "particle_attribute_18",
-     "particle_attribute_19"};
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
 
   int i;
@@ -455,7 +459,9 @@ herr_t AMRHDF5Writer::writeParticles ( const int nPart,
      "bhseed_kernel_complete", "bhseed_host_dm_density",
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -465,8 +471,10 @@ herr_t AMRHDF5Writer::writeParticles ( const int nPart,
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "particle_attribute_17", "particle_attribute_18",
-     "particle_attribute_19"};
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
 
   sprintf(gridDataName, "/grid-%d", gridId);
@@ -636,7 +644,9 @@ herr_t AMRHDF5Writer::writeParticles2( const int nPart,
      "bhseed_kernel_complete", "bhseed_host_dm_density",
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -646,8 +656,10 @@ herr_t AMRHDF5Writer::writeParticles2( const int nPart,
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "particle_attribute_17", "particle_attribute_18",
-     "particle_attribute_19"};
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
 
   /* if there's no particle, don't bother,
@@ -897,7 +909,9 @@ void AMRHDF5Writer::AMRHDF5CreateSeparateParticles( const char*      fileName,
      "bhseed_kernel_complete", "bhseed_host_dm_density",
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -907,8 +921,10 @@ void AMRHDF5Writer::AMRHDF5CreateSeparateParticles( const char*      fileName,
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "particle_attribute_17", "particle_attribute_18",
-     "particle_attribute_19"};
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
 
   int i;
@@ -1009,7 +1025,9 @@ herr_t AMRHDF5Writer::writeSeparateParticles ( const int nPart,
      "bhseed_kernel_complete", "bhseed_host_dm_density",
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-     "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   const char *ParticleAttributeLabel[] = 
     {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -1019,8 +1037,10 @@ herr_t AMRHDF5Writer::writeSeparateParticles ( const int nPart,
      "bhseed_accept_rank", "bhaccr_accreted_mass",
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "particle_attribute_17", "particle_attribute_18",
-     "particle_attribute_19"};
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
 
   if (nPart == 0) 

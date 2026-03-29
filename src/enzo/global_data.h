@@ -1167,6 +1167,17 @@ EXTERN int   BHAccretionRunEveryTimestep;        // 0=finest-only-like cadence
 EXTERN float BHAccretionIgnoredDVWarn;           // warning threshold (km/s)
 EXTERN float BHAccretionIgnoredPFracWarn;        // warning threshold (dimensionless)
 
+/* BH feedback diagnostics (Phase A) */
+EXTERN int   BHFeedbackMethod;                   // 0=off, 1=thermal framework, 2=two-mode scaffold
+EXTERN float BHFeedbackModeThreshold;            // f_Edd threshold for thermal mode
+EXTERN float BHFeedbackKernelRadius;             // physical kpc
+EXTERN float BHFeedbackThermalEfficiency;        // thermal coupling epsilon_f
+EXTERN double BHFeedbackMinEnergyBurst;          // burst threshold (erg)
+EXTERN float BHFeedbackKineticEfficiency;        // parsed for Phase C
+EXTERN float BHFeedbackWindVelocity;             // km/s, parsed for Phase C
+EXTERN int   BHFeedbackKineticGeometry;          // parsed for Phase C
+EXTERN int   BHFeedbackVerbose;                  // logging verbosity
+
 /* Star Class Radiation Particle IO (PARTICLE_TYPE_RAD) */
 EXTERN char *RadiationSourcesFileName;
 EXTERN int   NumberOfRadiationParticles;

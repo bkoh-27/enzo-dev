@@ -338,13 +338,17 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
   if (BHAccretionMethod)
     required_bh_attributes = max(required_bh_attributes,
                                  PARTICLE_ATTRIBUTE_BHACCR_REQUIRED);
+  if (BHFeedbackMethod)
+    required_bh_attributes = max(required_bh_attributes,
+                                 PARTICLE_ATTRIBUTE_BHFDBK_REQUIRED);
 
   if (required_bh_attributes > 0 &&
       NumberOfParticleAttributes < required_bh_attributes) {
     if (MyProcessorNumber == ROOT_PROCESSOR)
       fprintf(stderr, "INFO [BH_ATTR]: BHSeedingMethod=%"ISYM" BHAccretionMethod=%"ISYM" "
-              "requires NumberOfParticleAttributes>=%"ISYM"; increasing %"ISYM" -> %"ISYM".\n",
-              BHSeedingMethod, BHAccretionMethod, required_bh_attributes,
+              "BHFeedbackMethod=%"ISYM" requires NumberOfParticleAttributes>=%"ISYM"; "
+              "increasing %"ISYM" -> %"ISYM".\n",
+              BHSeedingMethod, BHAccretionMethod, BHFeedbackMethod, required_bh_attributes,
               NumberOfParticleAttributes, required_bh_attributes);
     NumberOfParticleAttributes = required_bh_attributes;
   }

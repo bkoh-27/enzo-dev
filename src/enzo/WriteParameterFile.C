@@ -1134,6 +1134,21 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHAccretionRunEveryTimestep = %"ISYM"\n\n",
           BHAccretionRunEveryTimestep);
 
+  fprintf(fptr, "BHFeedbackMethod            = %"ISYM"\n", BHFeedbackMethod);
+  fprintf(fptr, "BHFeedbackModeThreshold     = %"GOUTSYM"\n", BHFeedbackModeThreshold);
+  fprintf(fptr, "BHFeedbackKernelRadius      = %"GOUTSYM"  # physical kpc\n",
+          BHFeedbackKernelRadius);
+  fprintf(fptr, "BHFeedbackThermalEfficiency = %"GOUTSYM"\n",
+          BHFeedbackThermalEfficiency);
+  fprintf(fptr, "BHFeedbackMinEnergyBurst    = %.15e  # erg\n",
+          BHFeedbackMinEnergyBurst);
+  fprintf(fptr, "BHFeedbackKineticEfficiency = %"GOUTSYM"\n",
+          BHFeedbackKineticEfficiency);
+  fprintf(fptr, "BHFeedbackWindVelocity      = %"GOUTSYM"  # km/s\n",
+          BHFeedbackWindVelocity);
+  fprintf(fptr, "BHFeedbackKineticGeometry   = %"ISYM"\n", BHFeedbackKineticGeometry);
+  fprintf(fptr, "BHFeedbackVerbose           = %"ISYM"\n\n", BHFeedbackVerbose);
+
   fprintf(fptr, "MBHParticleIO                         = %"ISYM"\n",
 	  MBHParticleIO);
   if (MBHParticleIOFilename != NULL)

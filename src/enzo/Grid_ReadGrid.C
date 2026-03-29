@@ -88,7 +88,9 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
        "bhseed_kernel_complete", "bhseed_host_dm_density",
        "bhseed_accept_rank", "bhaccr_accreted_mass",
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
-       "bhaccr_last_eddington_ratio", "bh_formation_mass"};
+       "bhaccr_last_eddington_ratio", "bh_formation_mass",
+       "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+       "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
     char *ParticleAttributeLabel[] = 
       {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -98,8 +100,10 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
        "bhseed_accept_rank", "bhaccr_accreted_mass",
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
-       "particle_attribute_17", "particle_attribute_18",
-       "particle_attribute_19"};
+       "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+       "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+       "particle_attribute_21", "particle_attribute_22",
+       "particle_attribute_23"};
 #endif
 
 #ifdef USE_HDF4

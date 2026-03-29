@@ -146,10 +146,28 @@ int grid::Group_WriteGrid(FILE *fptr, char *base_name, int grid_id, HDF5_hid_t f
 #ifdef WINDS
   char *ParticleAttributeLabel[] =
     {"creation_time", "dynamical_time", "metallicity_fraction", "particle_jet_x", 
-     "particle_jet_y", "particle_jet_z", "typeia_fraction"};
+     "particle_jet_y", "particle_jet_z", "typeia_fraction",
+     "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
+     "bhseed_patch_metallicity", "bhseed_patch_density_peak",
+     "bhseed_kernel_complete", "bhseed_host_dm_density",
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
 #else
   char *ParticleAttributeLabel[] = 
-    {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction"};
+    {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
+     "bhseed_channel", "bhseed_redshift", "bhseed_patch_mass",
+     "bhseed_patch_metallicity", "bhseed_patch_density_peak",
+     "bhseed_kernel_complete", "bhseed_host_dm_density",
+     "bhseed_accept_rank", "bhaccr_accreted_mass",
+     "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
+     "bhaccr_last_eddington_ratio", "bh_formation_mass",
+     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
+     "particle_attribute_21", "particle_attribute_22",
+     "particle_attribute_23"};
 #endif
   char *SmoothedDMLabel[] = {"Dark_Matter_Density", "Velocity_Dispersion",
 			     "Particle_x-velocity", "Particle_y-velocity",

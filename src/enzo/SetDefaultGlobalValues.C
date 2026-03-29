@@ -794,6 +794,16 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHAccretionIgnoredDVWarn         = 1.0;    // km/s
   BHAccretionIgnoredPFracWarn      = 0.01;   // dimensionless
 
+  BHFeedbackMethod                 = 0;
+  BHFeedbackModeThreshold          = 0.01;
+  BHFeedbackKernelRadius           = 1.0;    // physical kpc
+  BHFeedbackThermalEfficiency      = 0.02;
+  BHFeedbackMinEnergyBurst         = 1.0e50; // erg
+  BHFeedbackKineticEfficiency      = 0.1;    // parsed for Phase C
+  BHFeedbackWindVelocity           = 1.0e4;  // km/s, parsed for Phase C
+  BHFeedbackKineticGeometry        = 0;      // parsed for Phase C
+  BHFeedbackVerbose                = 1;
+
   H2StarMakerEfficiency = 0.01;
   H2StarMakerNumberDensityThreshold = 0.0;
   H2StarMakerMinimumMass = 0.0;
