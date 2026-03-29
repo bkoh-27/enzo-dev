@@ -433,6 +433,80 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       warned_potential_unavailable = TRUE;
     }
 
+    double displacement_code = 0.0;
+    int reposition_occurred = 0;
+    int reposition_clamped = 0;
+
+    FLOAT bh_pos_new[MAX_DIMENSION] = {bh_pos[0], bh_pos[1], bh_pos[2]};
+    if (BHRepositionMethod > 0 && active_target_exists) {
+      if (BHRepositionMethod == 1) {
+        const double max_displacement_code =
+          double(BHRepositionMaxDisplacement) * double(cell_width);
+        if (active_offset_code <= max_displacement_code) {
+          for (int dim = 0; dim < GridRank; dim++)
+            bh_pos_new[dim] = active_peak_pos[dim];
+          displacement_code = active_offset_code;
+        } else if (active_offset_code > 0.0 && max_displacement_code > 0.0) {
+          const double frac = max_displacement_code / active_offset_code;
+          for (int dim = 0; dim < GridRank; dim++)
+            bh_pos_new[dim] =
+              bh_pos[dim] + FLOAT(frac * double(active_peak_pos[dim] - bh_pos[dim]));
+          displacement_code = max_displacement_code;
+        }
+      } else if (BHRepositionMethod == 2) {
+        for (int dim = 0; dim < GridRank; dim++)
+          bh_pos_new[dim] = active_peak_pos[dim];
+        displacement_code = active_offset_code;
+        if (BHRepositionVerbose >= 1 && displacement_code > search_radius_code) {
+          fprintf(logptr,
+                  "[BHREPOS_WARN] step=%d level=%d bh_id=%lld "
+                  "teleport displacement_cells=%.8g exceeds search_radius_cells=%.8g.\n",
+                  cycle_number, level, (long long) ParticleNumber[p],
+                  displacement_code / cell_width, search_radius_over_dx);
+        }
+      }
+    }
+
+    if (displacement_code > 0.0) {
+      for (int dim = 0; dim < GridRank; dim++) {
+        const double left = GridLeftEdge[dim];
+        const double right = GridRightEdge[dim];
+        const double edge_eps =
+          max(1.0e-12 * max(fabs(left), fabs(right)),
+              1.0e-9 * double(cell_width));
+        if (bh_pos_new[dim] < left) {
+          bh_pos_new[dim] = FLOAT(left);
+          reposition_clamped = 1;
+        }
+        if (bh_pos_new[dim] >= right) {
+          bh_pos_new[dim] = FLOAT(max(left, right - edge_eps));
+          reposition_clamped = 1;
+        }
+      }
+
+      if (reposition_clamped && BHRepositionVerbose >= 1) {
+        fprintf(logptr,
+                "[BHREPOS_WARN] step=%d level=%d bh_id=%lld "
+                "position clamped to active-zone bounds after reposition.\n",
+                cycle_number, level, (long long) ParticleNumber[p]);
+      }
+
+      ParticlePosition[0][p] = bh_pos_new[0];
+      if (GridRank > 1)
+        ParticlePosition[1][p] = bh_pos_new[1];
+      if (GridRank > 2)
+        ParticlePosition[2][p] = bh_pos_new[2];
+
+      displacement_code =
+        sqrt((double(bh_pos_new[0] - bh_pos[0]))*(double(bh_pos_new[0] - bh_pos[0])) +
+             (double(bh_pos_new[1] - bh_pos[1]))*(double(bh_pos_new[1] - bh_pos[1])) +
+             (double(bh_pos_new[2] - bh_pos[2]))*(double(bh_pos_new[2] - bh_pos[2])));
+      reposition_occurred = (displacement_code > 0.0) ? 1 : 0;
+    }
+
+    const double displacement_kpc = displacement_code * kpc_per_code;
+    const double displacement_cells = displacement_code / double(cell_width);
+
     const double reposition_wall_ms = 1000.0 * (ReturnWallTime() - t0);
 
     fprintf(logptr,
@@ -455,8 +529,8 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
             active_peak_pos[0], active_peak_pos[1], active_peak_pos[2],
             active_peak_density, active_offset_kpc, active_target_exists,
             offset_from_potential_kpc,
-            0.0, 0.0,
-            0, 0, 0,
+            displacement_kpc, displacement_cells,
+            reposition_occurred, reposition_clamped, 0,
             search_cells, search_active_cells, reposition_wall_ms);
   }
 

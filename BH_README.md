@@ -635,35 +635,41 @@ BHAccretionVerbose               = 1
 BHAccretionRunEveryTimestep      = 0
 ```
 
-## BH Reposition Phase A (Diagnostics Only)
-Phase A adds a read-only BH repositioning diagnostic pass between seeding finalize
-and accretion on each level update:
+## BH Reposition Phase B (Active Movement + Diagnostics)
+Phase B keeps the full Phase A diagnostic pass and then applies BH movement
+toward the active-zone density peak before accretion:
 
 `BHSeedFinalizeLevel -> BHRepositionDiagnosticHandler -> BHAccretionDiagnosticHandler`
 
-What Phase A does:
-- finds BH particles using the same type filter, deterministic ID ordering, and ownership gate as accretion,
-- skips newly seeded (`INT_UNDEFINED`) BHs with explicit sentinel logging,
-- scans a spherical search kernel (`BHRepositionSearchRadius`, physical kpc),
-- tracks two density peaks in one deterministic k-j-i traversal:
-  - diagnostic peak over active + ghost cells,
-  - active-zone peak over active cells only,
-- optionally computes offset to a local potential minimum when enabled and available,
-- logs one `[BHREPOS]` line per processed BH.
+Call-site behavior in `EvolveLevel`:
+- reposition handler runs only when `BHRepositionMethod > 0` **or**
+  `BHRepositionVerbose > 0`.
+- `BHRepositionMethod=0` and `BHRepositionVerbose=0` means fully off
+  (no handler call, no `[BHREPOS]` output).
 
-What Phase A does **not** do:
-- move BH positions,
-- modify BH velocities,
-- write any baryon or potential fields.
+What Phase B does:
+- keeps deterministic BH selection/order/ownership and newly-seeded skip logic from Phase A,
+- computes diagnostic and active-zone peaks exactly as in Phase A,
+- moves BHs only toward the **active-zone** peak:
+  - method `1`: rate-limited drift, cap = `BHRepositionMaxDisplacement * dx_local`,
+  - method `2`: teleport debug mode to active-zone peak,
+- applies a defensive active-zone clamp for floating-point edge cases,
+- writes updated `ParticlePosition[dim][p]` directly,
+- leaves `ParticleVelocity` unchanged.
 
-### Reposition Parameters (Phase A)
-| Parameter | Default | Phase A status |
+What Phase B still does **not** do:
+- modify baryon fields,
+- modify potential fields,
+- apply any velocity kick from repositioning.
+
+### Reposition Parameters (Phase B)
+| Parameter | Default | Phase B status |
 | --- | --- | --- |
-| `BHRepositionMethod` | `0` | parsed/written; diagnostics still run for all values |
+| `BHRepositionMethod` | `0` | active: `0` off/diagnostic-only via verbosity, `1` drift, `2` teleport |
 | `BHRepositionSearchRadius` | `3.0` | active (physical kpc) |
-| `BHRepositionMaxDisplacement` | `0.5` | parsed/validated only (Phase B use) |
+| `BHRepositionMaxDisplacement` | `0.5` | active (cell widths per update, method 1) |
 | `BHRepositionDiagnosePotential` | `0` | active optional diagnostic |
-| `BHRepositionVerbose` | `1` | active warning verbosity |
+| `BHRepositionVerbose` | `1` | active warning/log control |
 
 Runtime validation:
 - hard errors:
@@ -674,17 +680,19 @@ Runtime validation:
   - under-resolved kernel (`search_radius/dx < 1.5`),
   - kernel wider than nominal ghost support (`search_radius/dx > 3`),
   - `BHRepositionMaxDisplacement` larger than kernel radius in cell widths,
-  - potential diagnostic requested but potential field unavailable (logged once per level pass).
+  - potential diagnostic requested but potential field unavailable (once per level pass),
+  - teleport displacement larger than search radius (method 2),
+  - defensive clamp triggered after movement.
 
 ### `[BHREPOS]` Log Fields
 Each line reports:
-- BH id, redshift, BH position, and host-cell density,
+- BH id, redshift, BH position (pre-move for this pass), and host-cell density,
 - diagnostic peak position/density, ghost flag, and BH-to-peak offset,
 - active-zone peak position/density and offset,
 - `active_target_exists`,
 - optional potential-min offset (`-1` when unavailable/disabled),
-- displacement fields (`0` in Phase A),
-- `reposition_occurred=0`, `reposition_clamped=0`,
+- `displacement_kpc`, `displacement_cells`,
+- `reposition_occurred`, `reposition_clamped`,
 - `newly_seeded_skip`,
 - kernel cell counts (`search_cells`, `search_active_cells`),
 - `reposition_wall_ms`.
