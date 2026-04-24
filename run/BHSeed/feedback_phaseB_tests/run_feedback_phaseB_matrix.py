@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import os
 import re
 import shutil
@@ -11,12 +12,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 TS3_DIR = ROOT / "run/BHSeed/TS3_wrap"
-OUT_ROOT = ROOT / f"run/BHSeed/feedback_phaseB_tests/matrix_{time.strftime('%Y%m%d_%H%M%S')}"
+OUT_ROOT = Path(os.environ.get(
+    "BH_FEEDBACK_PHASEB_OUT_ROOT",
+    ROOT / f"run/BHSeed/feedback_phaseB_tests/matrix_{time.strftime('%Y%m%d_%H%M%S')}",
+))
 ENZO_EXE = ROOT / "src/enzo/enzo.exe"
 MPIRUN = Path("/home/bkoh/miniconda3/envs/enzo/bin/mpirun")
 if not MPIRUN.exists():
     MPIRUN = "mpirun"
 CONDA_BIN = Path("/home/bkoh/miniconda3/envs/enzo/bin")
+FLOAT32_MAX = 3.4028234663852886e38
 
 
 @dataclass
@@ -106,6 +111,84 @@ def last_real_bhfdbk(log, bh_id=1):
     return rows[-1] if rows else {}
 
 
+def read_hdf5_dataset_values(path, dataset_name):
+    def collect_with_h5py_module(h5py_module):
+        values = []
+        with h5py_module.File(path, "r") as h5f:
+            def collect(name, obj):
+                if name.rsplit("/", 1)[-1] != dataset_name:
+                    return
+                if not hasattr(obj, "shape"):
+                    return
+                data = obj[()]
+                try:
+                    values.extend(float(v) for v in data.reshape(-1))
+                except AttributeError:
+                    values.append(float(data))
+            h5f.visititems(collect)
+        return values
+
+    try:
+        import h5py
+    except ImportError as err:
+        h5py_import_error = err
+    else:
+        try:
+            values = collect_with_h5py_module(h5py)
+        except Exception as err:
+            return [], f"{path}: {err}"
+        if not values:
+            return [], f"{dataset_name} not found in {path}"
+        return values, "ok"
+
+    helper_python = Path("/home/bkoh/miniconda3/envs/yt-env/bin/python")
+    if helper_python.exists():
+        code = r"""
+import json
+import sys
+import h5py
+
+path = sys.argv[1]
+dataset_name = sys.argv[2]
+values = []
+with h5py.File(path, "r") as h5f:
+    def collect(name, obj):
+        if name.rsplit("/", 1)[-1] != dataset_name:
+            return
+        if not hasattr(obj, "shape"):
+            return
+        data = obj[()]
+        try:
+            values.extend(float(v) for v in data.reshape(-1))
+        except AttributeError:
+            values.append(float(data))
+    h5f.visititems(collect)
+print(json.dumps(values))
+"""
+        proc = subprocess.run(
+            [str(helper_python), "-c", code, str(path), dataset_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode == 0:
+            values = json.loads(proc.stdout)
+            if not values:
+                return [], f"{dataset_name} not found in {path}"
+            return values, f"ok via {helper_python}"
+        return [], f"{helper_python} h5py read failed: {proc.stderr.strip()}"
+
+    return [], f"h5py unavailable: {h5py_import_error}"
+
+
+def checkpoint_bhfdbk_reservoir_values(cdir, dump_number):
+    stem = f"data{dump_number:04d}"
+    return read_hdf5_dataset_values(
+        cdir / f"DD{dump_number:04d}" / f"{stem}.cpu0000",
+        "bhfdbk_energy_reservoir",
+    )
+
+
 def bhaccr(log, bh_id=1):
     rows = [parse_kv(ln) for ln in lines(log, "[BHACCR]") if "[BHACCR_WARN]" not in ln]
     rows = [d for d in rows if d.get("bh_id") == bh_id]
@@ -136,6 +219,14 @@ def run_named(name, overrides, base="bhseed_ts3wrap.enzo", np_ranks=1):
     cdir = prepare_case(name, base=base, overrides=overrides)
     rc, log = run_enzo(cdir, np_ranks=np_ranks)
     return cdir, rc, log
+
+
+def extend_restart_stop_time(restart_parameter_file, stop_time):
+    if not restart_parameter_file.exists():
+        return False
+    text = restart_parameter_file.read_text(errors="ignore")
+    restart_parameter_file.write_text(set_param(text, "StopTime", stop_time))
+    return True
 
 
 def main():
@@ -170,7 +261,7 @@ def main():
                             kin.get("reservoir_final") == kin.get("reservoir_before"),
                             f"mode={kin.get('feedback_mode')} reservoir_final={kin.get('reservoir_final')}", kin))
 
-    _, rc_acc, log_acc = run_named("test4_5_accumulate_below_threshold", common_feedback(
+    c_acc, rc_acc, log_acc = run_named("test4_5_accumulate_below_threshold", common_feedback(
         BHFeedbackModeThreshold=1e-10,
         BHFeedbackMinEnergyBurst=1e50,
     ))
@@ -182,6 +273,18 @@ def main():
     results.append(passfail("Test 5 no injection below threshold",
                             acc.get("E_deposited") == 0 and acc.get("burst_occurred") == 0,
                             f"E_deposited={acc.get('E_deposited')}", acc))
+    stored_reservoir_values, stored_reservoir_detail = checkpoint_bhfdbk_reservoir_values(c_acc, 2)
+    stored_reservoir = max(stored_reservoir_values) if stored_reservoir_values else math.inf
+    results.append(passfail("Test 22 reservoir stored in code units",
+                            rc_acc == 0 and
+                            acc.get("reservoir_final", 0.0) > FLOAT32_MAX and
+                            math.isfinite(stored_reservoir) and
+                            0.0 <= stored_reservoir < FLOAT32_MAX,
+                            f"reservoir_final_cgs={acc.get('reservoir_final')} "
+                            f"stored_attr={stored_reservoir} detail={stored_reservoir_detail}",
+                            {"reservoir_final_cgs": acc.get("reservoir_final"),
+                             "stored_attr": stored_reservoir,
+                             "detail": stored_reservoir_detail}))
 
     _, rc_burst, log_burst = run_named("test1_2_3_6_burst", common_feedback(
         BHFeedbackModeThreshold=1e-10,
@@ -205,6 +308,14 @@ def main():
                             burst.get("E_deposited", 0) == burst.get("reservoir_after_accum", -1) and
                             burst.get("reservoir_final") == 0,
                             "full reservoir deposited", burst))
+    schema_rows = [d for d in bhfdbk(log_acc) + bhfdbk(log_burst)]
+    schema_ok = (schema_rows and
+                 all("reservoir_after_accum" in d for d in schema_rows) and
+                 all("reservoir_after" not in d for d in schema_rows))
+    results.append(passfail("Test 23 BHFDBK reservoir-after log schema",
+                            schema_ok,
+                            "reservoir_after removed; reservoir_after_accum retained",
+                            {"rows_checked": len(schema_rows)}))
 
     results.append(passfail("Test 10 SF blocking heated cells only",
                             burst.get("n_sf_blocked_feedback", 0) == burst.get("feedback_kernel_active_cells", -1),
@@ -315,10 +426,41 @@ def main():
                             rc0 == 0 and tags_ok,
                             "seed -> reposition -> accrete -> feedback completed", {}))
 
+    c_restart, rc_restart_first, log_restart_first = run_named("test7_restart_smoke", common_feedback(
+        BHFeedbackModeThreshold=1e-10,
+        BHFeedbackMinEnergyBurst=1e50,
+        StopTime=0.02,
+    ))
+    first_stage_rows = [d for d in bhfdbk(log_restart_first, 1)
+                        if d.get("newly_seeded_skip", 0) == 0]
+    first_stage_last = first_stage_rows[-1] if first_stage_rows else {}
+    restart_file = c_restart / "DD0002" / "data0002"
+    restart_ready = extend_restart_stop_time(restart_file, 0.04)
+    if restart_ready:
+        rc_restart_second, log_restart = run_enzo(
+            c_restart, log_name="restart.log", restart="DD0002/data0002")
+        restart_rows = [d for d in bhfdbk(log_restart, 1)
+                        if d.get("newly_seeded_skip", 0) == 0]
+    else:
+        rc_restart_second, log_restart, restart_rows = 1, c_restart / "restart.log", []
+    restarted_first = restart_rows[0] if restart_rows else {}
+    restart_match = (
+        bool(first_stage_last) and bool(restarted_first) and
+        math.isclose(restarted_first.get("reservoir_before", -1.0),
+                     first_stage_last.get("reservoir_final", -2.0),
+                     rel_tol=1e-12, abs_tol=0.0)
+    )
     results.append(passfail("Test 7 reservoir checkpoint/restart",
-                            rc_pres == 0 and preserved,
-                            "reservoir persistence path is the checkpointed particle attribute; continuous carry-over verified",
-                            {"restart_note": "HDF5 attribute readback requires h5py/h5dump in this environment"}))
+                            rc_pres == 0 and rc_restart_first == 0 and
+                            rc_restart_second == 0 and restart_match,
+                            "restart reservoir_before matches first-stage reservoir_final at DD0002",
+                            {"rc_first": rc_restart_first,
+                             "rc_restart": rc_restart_second,
+                             "first_stage_reservoir_final":
+                                 first_stage_last.get("reservoir_final"),
+                             "restart_reservoir_before":
+                                 restarted_first.get("reservoir_before"),
+                             "restart_log": str(log_restart)}))
 
     rec = {
         "out_root": str(OUT_ROOT),

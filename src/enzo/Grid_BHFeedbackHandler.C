@@ -98,6 +98,33 @@ static double BHFeedbackKernelRadiusCode(float KernelRadiusPhysKpc,
   return kernel_radius_code;
 }
 
+/* The checkpointed particle attribute stores the feedback reservoir in code
+   energy units. All calculations and BHFDBK log fields use CGS ergs. Keeping
+   the storage conversion here prevents 4-byte ParticleAttribute builds from
+   overflowing on normal reservoir values around 1e41 erg. */
+static double BHFeedbackReservoirStoredToCGS(double reservoir_code,
+                                             double energy_units)
+{
+  if (!isfinite(reservoir_code) || reservoir_code < 0.0 ||
+      energy_units <= 0.0)
+    return 0.0;
+  return reservoir_code * energy_units;
+}
+
+static float BHFeedbackReservoirCGSToStored(double reservoir_cgs,
+                                            double energy_units)
+{
+  if (!isfinite(reservoir_cgs) || reservoir_cgs < 0.0 ||
+      energy_units <= 0.0)
+    return 0.0f;
+
+  const double reservoir_code = reservoir_cgs / energy_units;
+  if (!isfinite(reservoir_code) || reservoir_code < 0.0)
+    return 0.0f;
+
+  return float(reservoir_code);
+}
+
 int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
                             int level, int cycle_number,
                             float dtLevelAbove)
@@ -211,7 +238,7 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
         fprintf(logptr,
                 "[BHFDBK] step=%d level=%d z=%.8g bh_id=%lld bh_mass=%.8g "
                 "feedback_mode=OFF f_Edd=-1 L_feedback=-1 E_requested=-1 "
-                "reservoir_before=-1 reservoir_after=-1 burst_diag=0 "
+                "reservoir_before=-1 burst_diag=0 "
                 "E_deposited=0 p_requested=-1 p_deposited=0 "
                 "feedback_kernel_cells=0 feedback_kernel_active_cells=0 "
                 "T_before_mean=-1 T_after_mean=-1 n_sf_blocked_feedback=0 "
@@ -255,9 +282,10 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
 
     double reservoir_before = 0.0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
-      reservoir_before = ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p];
-      if (!isfinite(reservoir_before) || reservoir_before < 0.0)
-        reservoir_before = 0.0;
+      const double reservoir_stored =
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p];
+      reservoir_before =
+        BHFeedbackReservoirStoredToCGS(reservoir_stored, energy_units);
     }
 
     double E_requested = 0.0;
@@ -434,7 +462,7 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       if (!isfinite(reservoir_final) || reservoir_final < 0.0)
         reservoir_final = 0.0;
       ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p] =
-        float(reservoir_final);
+        BHFeedbackReservoirCGSToStored(reservoir_final, energy_units);
     }
 
     const double kernel_cells_per_radius = kernel_radius_code / cell_width;
@@ -472,7 +500,7 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       fprintf(logptr,
               "[BHFDBK] step=%d level=%d z=%.8g bh_id=%lld bh_mass=%.8g "
               "feedback_mode=%s f_Edd=%.8e L_feedback=%.8e E_requested=%.8e "
-              "reservoir_before=%.8e reservoir_after=%.8e burst_diag=%d "
+              "reservoir_before=%.8e burst_diag=%d "
               "E_deposited=%.8e p_requested=%.8e p_deposited=%.8e "
               "feedback_kernel_cells=%d feedback_kernel_active_cells=%d "
               "feedback_kernel_gas_msun=%.8e "
@@ -483,7 +511,7 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
               "newly_seeded_skip=0 feedback_wall_ms=%.4f\n",
               cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
               feedback_mode, f_edd, L_feedback, E_requested,
-              reservoir_before, reservoir_after_accum, burst_diag,
+              reservoir_before, burst_diag,
               E_deposited, p_requested, p_deposited,
               n_kernel_cells, n_kernel_active_cells,
               kernel_gas_mass * mass_to_msun,

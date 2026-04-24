@@ -349,7 +349,7 @@ def main():
         lines = read_lines(logA, "[BHFDBK]")
         parsed = [parse_kv_line(l) for l in lines]
         seq = [d for d in parsed if int(d.get("bh_id", -1)) == 1]
-        ra = [d.get("reservoir_after", 0.0) for d in seq[0:3]]
+        ra = [d.get("reservoir_after_accum", d.get("reservoir_after", 0.0)) for d in seq[0:3]]
         rb = [d.get("reservoir_before", 0.0) for d in seq[0:3]]
         ok = all(rb_i == 0.0 for rb_i in rb) and (ra[2] > ra[1] > ra[0] > 0.0)
         results.append(TestResult("4", ok, f"ra={ra} rb={rb}", {}))
@@ -412,8 +412,8 @@ def main():
             id1, id2 = ids[0], ids[1]
             seq1 = by_id[id1]
             seq2 = by_id[id2]
-            ra1 = [d.get("reservoir_after", 0.0) for d in seq1[:3]]
-            ra2 = [d.get("reservoir_after", 0.0) for d in seq2[:3]]
+            ra1 = [d.get("reservoir_after_accum", d.get("reservoir_after", 0.0)) for d in seq1[:3]]
+            ra2 = [d.get("reservoir_after_accum", d.get("reservoir_after", 0.0)) for d in seq2[:3]]
             mode1 = seq1[-1].get("feedback_mode", "")
             mode2 = seq2[-1].get("feedback_mode", "")
             ok = (ra1[2] > ra1[1] > ra1[0] > 0.0 and ra2[2] > ra2[1] > ra2[0] > 0.0 and mode1 != "" and mode2 != "")
