@@ -769,3 +769,177 @@ Each line reports:
 - `n_sf_blocked_feedback` (always `0` in Phase A),
 - `newly_seeded_skip`,
 - `feedback_wall_ms`.
+
+## BH Feedback Phase B (Thermal Coupling)
+Phase B keeps the Phase A diagnostic pass, then activates thermal reservoir
+mutation and burst deposition. It remains thermal-only. There is no kinetic
+momentum injection, bipolar geometry, cooling suppression, temperature floor,
+or feedback timestep limiter in Phase B.
+
+Runtime order remains:
+
+`BHRepositionDiagnosticHandler -> BHAccretionDiagnosticHandler -> BHFeedbackHandler -> StarParticleHandler`
+
+### Phase B Mode Behavior
+- `BHFeedbackMethod = 0`: feedback handler returns immediately.
+- `BHFeedbackMethod = 1`: thermal feedback is active only when
+  `f_Edd > BHFeedbackModeThreshold`.
+- `BHFeedbackMethod = 2`: accepted for forward compatibility, but behaves like
+  method 1 in Phase B. Low-`f_Edd` BHs are logged as `KINETIC_INACTIVE`.
+- `KINETIC_INACTIVE`: no reservoir accumulation, no burst decision, no
+  deposition, and the existing `BHFeedbackEnergyReservoir` value is preserved.
+- Newly seeded BHs (`ParticleNumber == INT_UNDEFINED`) log
+  `newly_seeded_skip=1` and do not feed back in the same pass.
+
+### Burst Mechanics
+For thermal-mode BHs, the handler reads `BHLastMdotActual` from the accretion
+handler, computes the thermal request, and adds it to the checkpointed
+`BHFeedbackEnergyReservoir` particle attribute:
+
+```text
+E_requested = BHFeedbackThermalEfficiency
+            * BHAccretionRadiativeEfficiency
+            * Mdot_actual
+            * c^2
+            * dt
+```
+
+The reservoir is stored in erg. When
+`BHFeedbackEnergyReservoir >= BHFeedbackMinEnergyBurst`, the full reservoir is
+selected as one burst. A successful burst deposits the full stored energy and
+sets the reservoir to zero. There is no partial drain or minimum temperature
+jump criterion in Phase B.
+
+If the burst kernel has no active-zone gas deposition cells, the burst energy
+is returned to `BHFeedbackEnergyReservoir`, `E_deposited=0`,
+`burst_occurred=0`, `kernel_gas_zero=1`, and `BHLastFeedbackRedshift` is not
+updated.
+
+### Thermal Deposition Pattern
+Phase B matches ENZO's thermal feedback convention from `Grid_AddFeedbackSphere`
+for `MBH_THERMAL` feedback:
+
+- `TotalEnergy` and `InternalEnergy`/`GasEnergy` are specific energies.
+- With `DualEnergyFormalism`, the internal-energy field is increased by the
+  thermal specific-energy increment. For PPM-like hydro, `TotalEnergy` is then
+  reconstructed as internal specific energy plus kinetic specific energy. For
+  Zeus, the energy field is treated as internal specific energy.
+- Without `DualEnergyFormalism`, `TotalEnergy` receives the thermal specific
+  energy increment directly.
+
+The feedback kernel is a sphere of radius `BHFeedbackKernelRadius` in physical
+kpc. Only active-zone cells are deposition targets; ghost cells are never
+written. Traversal is deterministic `k-j-i`. Deposition is mass-weighted:
+
+```text
+fraction_i = (rho_i * V_cell) / sum_j(rho_j * V_cell)
+dE_i       = E_burst * fraction_i
+de_i       = dE_i / (rho_i * V_cell)
+```
+
+The code applies a final-cell remainder correction and hard-fails if
+`abs(sum(dE_i) - E_burst) / E_burst > 1e-10`.
+
+### SF Blocking
+Every active-zone cell with `dE_i > 0` is marked in the transient SF mask:
+
+```text
+BaryonField[NumberOfBaryonFields][cell] = 1.0
+```
+
+This is the same mask used by BH seeding/accretion and by star formation to
+skip cells. It is a flag, so accretion-removed cells and feedback-heated cells
+naturally form a union. Ghost cells and merely inspected kernel cells are not
+blocked.
+
+### Gas-Poor Handling
+`BHFeedbackKernelMassWarnThreshold` is a Phase B parameter in `Msun`, default
+`1e3`. If the active-zone gas mass in the feedback kernel is below this value,
+the handler logs `kernel_gas_low=1` and deposits the full burst anyway. This is
+warning-only and has no physics effect.
+
+If no active-zone gas deposition cells are available, the handler logs
+`kernel_gas_zero=1` and returns the full burst energy to the reservoir.
+
+### Metadata and Restart
+- `BHFeedbackEnergyReservoir` is checkpointed as a particle scalar and is the
+  only Phase B reservoir state.
+- `BHLastFeedbackRedshift` is updated only when `E_deposited > 0`.
+- On restart, accumulation continues from the stored reservoir value; burst
+  timing is therefore restart-consistent up to the float precision of the
+  particle attribute storage.
+
+### Multi-BH Behavior
+Within a grid, BH particles are processed in ascending particle ID order.
+Overlapping kernels are additive: if two BHs heat the same active-zone cell, the
+cell receives both thermal increments, and later BHs see the gas state left by
+earlier BHs on that grid. The SF mask remains the union of all heated cells.
+There is no Phase B inter-grid communication for feedback deposition.
+
+### Phase B Feedback Parameters
+| Parameter | Default | Phase B status |
+| --- | --- | --- |
+| `BHFeedbackMethod` | `0` | active (`0` off, `1` thermal active, `2` thermal active with kinetic inactive) |
+| `BHFeedbackModeThreshold` | `0.01` | active thermal/kinetic-inactive threshold |
+| `BHFeedbackKernelRadius` | `1.0` | active, physical kpc |
+| `BHFeedbackThermalEfficiency` | `0.02` | active thermal coupling efficiency |
+| `BHFeedbackMinEnergyBurst` | `1e50` | active fixed burst threshold, erg |
+| `BHFeedbackKernelMassWarnThreshold` | `1e3` | active gas-poor warning threshold, Msun |
+| `BHFeedbackKineticEfficiency` | `0.1` | parsed but unused until Phase C |
+| `BHFeedbackWindVelocity` | `1e4` | parsed but unused until Phase C |
+| `BHFeedbackKineticGeometry` | `0` | parsed but unused until Phase C |
+| `BHFeedbackVerbose` | `1` | active |
+
+Validation hard-errors if `BHFeedbackMethod` is not in `{0,1,2}`,
+`BHFeedbackKernelRadius <= 0`, `BHFeedbackThermalEfficiency` is outside
+`[0,1]`, `BHFeedbackMinEnergyBurst <= 0`, or
+`BHFeedbackKernelMassWarnThreshold <= 0`.
+
+### Phase B `[BHFDBK]` Fields
+Phase B preserves the Phase A fields and adds:
+
+- `reservoir_after_accum`: reservoir after adding this timestep's thermal
+  request, before burst/zero-gas handling,
+- `reservoir_final`: actual stored particle reservoir after all Phase B logic,
+- `burst_occurred`: `1` only when energy was actually deposited,
+- `kernel_gas_low`: `1` for gas-poor warning-only kernels,
+- `kernel_gas_zero`: `1` when no active-zone gas cells received feedback,
+- `dT_mean`: `T_after_mean - T_before_mean`,
+- `sum_deposited`, `deposit_rel_err`, `mass_weight_rel_err`: conservation and
+  mass-weighting diagnostics for Phase B tests.
+
+`E_deposited`, `T_after_mean`, and `n_sf_blocked_feedback` are no longer
+diagnostic placeholders in Phase B.
+
+### Unit Conversion Path
+`BHLastMdotActual` is written by the accretion handler in code mass per code
+time. The feedback handler converts it as:
+
+```text
+MassUnits        = DensityUnits * LengthUnits^3
+VelocityUnits    = LengthUnits / TimeUnits
+EnergyUnits      = MassUnits * VelocityUnits^2
+mdot_cgs         = Mdot_actual_code * MassUnits / TimeUnits
+dt_cgs           = dt_code * TimeUnits
+E_requested_erg  = epsilon_f * epsilon_r * mdot_cgs * c^2 * dt_cgs
+```
+
+For each heated cell:
+
+```text
+mcell_code       = rho_code * V_cell_code
+mcell_cgs        = mcell_code * MassUnits
+dE_i_erg         = E_burst_erg * mcell_code / sum(mcell_code)
+de_specific_code = dE_i_erg / (mcell_code * EnergyUnits)
+```
+
+Constants used by the implementation:
+
+- `clight = 2.99792458e10 cm/s`,
+- `SolarMass = 1.9891e33 g`,
+- `yr_s = 3.1556952e7 s`,
+- `kboltz = 1.3806504e-16 erg/K`,
+- `mh = 1.67262171e-24 g`,
+- code `MassUnits = DensityUnits * LengthUnits^3`,
+- code `LengthUnits`, `TimeUnits`, and `VelocityUnits` from `GetUnits`,
+- code `EnergyUnits = MassUnits * VelocityUnits^2`.
