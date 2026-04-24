@@ -1173,6 +1173,7 @@ EXTERN float BHFeedbackModeThreshold;            // f_Edd threshold for thermal 
 EXTERN float BHFeedbackKernelRadius;             // physical kpc
 EXTERN float BHFeedbackThermalEfficiency;        // thermal coupling epsilon_f
 EXTERN double BHFeedbackMinEnergyBurst;          // burst threshold (erg)
+EXTERN float BHFeedbackKernelMassWarnThreshold;  // gas-poor warning threshold (Msun)
 EXTERN float BHFeedbackKineticEfficiency;        // parsed for Phase C
 EXTERN float BHFeedbackWindVelocity;             // km/s, parsed for Phase C
 EXTERN int   BHFeedbackKineticGeometry;          // parsed for Phase C

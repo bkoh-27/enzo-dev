@@ -1142,6 +1142,8 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
           BHFeedbackThermalEfficiency);
   fprintf(fptr, "BHFeedbackMinEnergyBurst    = %.15e  # erg\n",
           BHFeedbackMinEnergyBurst);
+  fprintf(fptr, "BHFeedbackKernelMassWarnThreshold = %"GOUTSYM"  # Msun\n",
+          BHFeedbackKernelMassWarnThreshold);
   fprintf(fptr, "BHFeedbackKineticEfficiency = %"GOUTSYM"\n",
           BHFeedbackKineticEfficiency);
   fprintf(fptr, "BHFeedbackWindVelocity      = %"GOUTSYM"  # km/s\n",
