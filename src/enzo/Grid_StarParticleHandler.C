@@ -536,7 +536,7 @@ int grid::StarParticleHandler(HierarchyEntry* SubgridPointer, int level,
      this mask and mark cells for SF blocking, so preserve it when present. */
   HierarchyEntry *Subgrid;
   int reuse_bhseed_mask =
-    ((BHSeedingMethod || BHAccretionMethod) &&
+    ((BHSeedingMethod || BHAccretionMethod || BHFeedbackMethod) &&
      BaryonField[NumberOfBaryonFields] != NULL);
   if (!reuse_bhseed_mask) {
     this->ZeroSolutionUnderSubgrid(NULL, ZERO_UNDER_SUBGRID_FIELD);
