@@ -1177,6 +1177,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
                   &BHFeedbackThermalEfficiency);
     ret += sscanf(line, "BHFeedbackMinEnergyBurst = %lf",
                   &BHFeedbackMinEnergyBurst);
+    ret += sscanf(line, "BHFeedbackKernelMassWarnThreshold = %"FSYM,
+                  &BHFeedbackKernelMassWarnThreshold);
     ret += sscanf(line, "BHFeedbackKineticEfficiency = %"FSYM,
                   &BHFeedbackKineticEfficiency);
     ret += sscanf(line, "BHFeedbackWindVelocity = %"FSYM,
@@ -2303,6 +2305,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ENZO_FAIL("BHFeedbackThermalEfficiency must satisfy 0 <= epsilon_f <= 1.");
   if (BHFeedbackMinEnergyBurst <= 0.0f)
     ENZO_FAIL("BHFeedbackMinEnergyBurst must be positive (erg).");
+  if (BHFeedbackKernelMassWarnThreshold <= 0.0f)
+    ENZO_FAIL("BHFeedbackKernelMassWarnThreshold must be positive (Msun).");
   if (BHFeedbackKineticEfficiency < 0.0f)
     ENZO_FAIL("BHFeedbackKineticEfficiency must be non-negative.");
   if (BHFeedbackWindVelocity <= 0.0f)
@@ -2310,7 +2314,7 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHFeedbackKineticGeometry != 0 && BHFeedbackKineticGeometry != 1)
     ENZO_FAIL("BHFeedbackKineticGeometry must be 0 (isotropic) or 1 (bipolar v2 placeholder).");
   if (BHFeedbackMethod == 2 && MyProcessorNumber == ROOT_PROCESSOR)
-    fprintf(stderr, "WARNING [BHFDBK]: BHFeedbackMethod=2 requested, but full two-mode active coupling requires Phase C. Running diagnostics-only scaffold.\n");
+    fprintf(stderr, "WARNING [BHFDBK]: BHFeedbackMethod=2 requested; Phase B is thermal-only, and low-f_Edd BHs are KINETIC_INACTIVE until Phase C.\n");
 
   /* Cosmic ray diffusion should be off if Cosmic rays are off */
   if(CRDiffusion > 0 && CRModel == 0){

@@ -799,6 +799,7 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHFeedbackKernelRadius           = 1.0;    // physical kpc
   BHFeedbackThermalEfficiency      = 0.02;
   BHFeedbackMinEnergyBurst         = 1.0e50; // erg
+  BHFeedbackKernelMassWarnThreshold = 1.0e3; // Msun
   BHFeedbackKineticEfficiency      = 0.1;    // parsed for Phase C
   BHFeedbackWindVelocity           = 1.0e4;  // km/s, parsed for Phase C
   BHFeedbackKineticGeometry        = 0;      // parsed for Phase C

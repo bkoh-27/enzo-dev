@@ -1,15 +1,14 @@
 /***********************************************************************
 /
-/  GRID CLASS (BH FEEDBACK DIAGNOSTICS, PHASE A)
+/  GRID CLASS (BH FEEDBACK, PHASE B THERMAL COUPLING)
 /
 /  PURPOSE:
-/    Compute diagnostics for thermal and kinetic BH feedback budgets and
-/    kernel statistics without modifying grid fields or feedback attributes.
+/    Compute BH feedback diagnostics, accumulate the thermal feedback
+/    reservoir, and deposit burst thermal energy into active-zone gas cells.
 /
-/  PHASE A GUARANTEES:
-/    - No energy/momentum deposition.
-/    - No baryon-field writes.
-/    - No mutation of BH feedback reservoir attributes.
+/  PHASE B LIMITS:
+/    - Thermal feedback only.
+/    - Kinetic-mode BHs are logged as KINETIC_INACTIVE and do not couple.
 /
 ************************************************************************/
 
@@ -17,7 +16,6 @@
 #include <math.h>
 #include <algorithm>
 #include <vector>
-#include <map>
 
 #include "ErrorExceptions.h"
 #include "performance.h"
@@ -59,6 +57,12 @@ struct BHFeedbackParticleOrder {
   }
 };
 
+struct BHFeedbackKernelCell {
+  int index;
+  double mass_code;
+  BHFeedbackKernelCell(int n, double m) : index(n), mass_code(m) { }
+};
+
 static double BHFeedbackKernelRadiusCode(float KernelRadiusPhysKpc,
                                          FLOAT time,
                                          float LengthUnits)
@@ -94,6 +98,33 @@ static double BHFeedbackKernelRadiusCode(float KernelRadiusPhysKpc,
   return kernel_radius_code;
 }
 
+/* The checkpointed particle attribute stores the feedback reservoir in code
+   energy units. All calculations and BHFDBK log fields use CGS ergs. Keeping
+   the storage conversion here prevents 4-byte ParticleAttribute builds from
+   overflowing on normal reservoir values around 1e41 erg. */
+static double BHFeedbackReservoirStoredToCGS(double reservoir_code,
+                                             double energy_units)
+{
+  if (!isfinite(reservoir_code) || reservoir_code < 0.0 ||
+      energy_units <= 0.0)
+    return 0.0;
+  return reservoir_code * energy_units;
+}
+
+static float BHFeedbackReservoirCGSToStored(double reservoir_cgs,
+                                            double energy_units)
+{
+  if (!isfinite(reservoir_cgs) || reservoir_cgs < 0.0 ||
+      energy_units <= 0.0)
+    return 0.0f;
+
+  const double reservoir_code = reservoir_cgs / energy_units;
+  if (!isfinite(reservoir_code) || reservoir_code < 0.0)
+    return 0.0f;
+
+  return float(reservoir_code);
+}
+
 int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
                             int level, int cycle_number,
                             float dtLevelAbove)
@@ -109,6 +140,14 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
   if (NumberOfBaryonFields == 0 || NumberOfParticles <= 0)
     return SUCCESS;
 
+  /* Ensure the transient SF mask exists for feedback-heated cell blocking.
+     Accretion may have already allocated and marked it earlier this pass. */
+  if (BaryonField[NumberOfBaryonFields] == NULL) {
+    this->ZeroSolutionUnderSubgrid(NULL, ZERO_UNDER_SUBGRID_FIELD);
+    for (HierarchyEntry *sg = SubgridPointer; sg != NULL; sg = sg->NextGridThisLevel)
+      this->ZeroSolutionUnderSubgrid(sg->GridData, ZERO_UNDER_SUBGRID_FIELD);
+  }
+
   int DensNum, GENum, TENum, Vel1Num, Vel2Num, Vel3Num, B1Num, B2Num, B3Num;
   if (this->IdentifyPhysicalQuantities(DensNum, GENum, Vel1Num, Vel2Num,
                                        Vel3Num, TENum, B1Num, B2Num, B3Num) == FAIL)
@@ -119,8 +158,6 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
     size *= GridDimension[dim];
 
   std::vector<float> temperature(size, 0.0f);
-  if (this->ComputeTemperatureField(&temperature[0]) == FAIL)
-    ENZO_FAIL("Error in grid->ComputeTemperatureField for BH feedback.");
 
   float DensityUnits = 1.0f, LengthUnits = 1.0f, TemperatureUnits = 1.0f;
   float TimeUnits = 1.0f, VelocityUnits = 1.0f;
@@ -148,6 +185,9 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
   const double mass_units = DensityUnits * pow(LengthUnits, 3.0);
   const double mass_rate_to_cgs = (TimeUnits > 0.0f) ? mass_units / TimeUnits : 0.0;
   const double mass_to_msun = mass_units / SolarMass;
+  const double energy_units = mass_units * VelocityUnits * VelocityUnits;
+  if (energy_units <= 0.0)
+    ENZO_FAIL("BH feedback requires positive code energy units.");
   const double cell_volume_code = pow(cell_width, 3.0);
 
   const int nx = GridDimension[0];
@@ -175,7 +215,6 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
 
   FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
   static int warned_method_two = FALSE;
-  static std::map<PINT, double> feedback_reservoir_diag_cache;
 
   for (size_t ip = 0; ip < bh_particles.size(); ip++) {
     const double t0_all = ReturnWallTime();
@@ -199,10 +238,13 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
         fprintf(logptr,
                 "[BHFDBK] step=%d level=%d z=%.8g bh_id=%lld bh_mass=%.8g "
                 "feedback_mode=OFF f_Edd=-1 L_feedback=-1 E_requested=-1 "
-                "reservoir_before=-1 reservoir_after=-1 burst_diag=0 "
+                "reservoir_before=-1 burst_diag=0 "
                 "E_deposited=0 p_requested=-1 p_deposited=0 "
                 "feedback_kernel_cells=0 feedback_kernel_active_cells=0 "
                 "T_before_mean=-1 T_after_mean=-1 n_sf_blocked_feedback=0 "
+                "reservoir_after_accum=-1 reservoir_final=-1 burst_occurred=0 "
+                "kernel_gas_low=0 kernel_gas_zero=0 dT_mean=0 "
+                "sum_deposited=0 deposit_rel_err=0 mass_weight_rel_err=0 "
                 "newly_seeded_skip=1 feedback_wall_ms=%.4f\n",
                 cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
                 feedback_wall_ms);
@@ -224,33 +266,51 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
         mdot_actual_code = 0.0;
     }
 
-    const char *feedback_mode = (f_edd > BHFeedbackModeThreshold) ? "THERMAL" : "KINETIC";
+    const int thermal_mode = (f_edd > BHFeedbackModeThreshold) ? 1 : 0;
+    const char *feedback_mode = thermal_mode ? "THERMAL" : "KINETIC_INACTIVE";
     if (BHFeedbackMethod == 2 && BHFeedbackVerbose >= 1 && !warned_method_two) {
       fprintf(logptr,
               "[BHFDBK_WARN] step=%d level=%d BHFeedbackMethod=2 requested; "
-              "active two-mode deposition requires Phase C. Running diagnostics-only framework.\n",
+              "kinetic feedback requires Phase C. Running Phase B thermal-only coupling; "
+              "low-f_Edd BHs are KINETIC_INACTIVE.\n",
               cycle_number, level);
       warned_method_two = TRUE;
     }
 
     const double mdot_cgs = mdot_actual_code * mass_rate_to_cgs;
     const double L_feedback = BHAccretionRadiativeEfficiency * mdot_cgs * clight * clight;
-    const double E_requested = BHFeedbackThermalEfficiency * L_feedback * dt_cgs;
-    const double p_requested =
-      BHFeedbackKineticEfficiency * mdot_cgs *
-      (double(BHFeedbackWindVelocity) * 1.0e5) * dt_cgs;
 
     double reservoir_before = 0.0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
-      reservoir_before = ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p];
-      if (!isfinite(reservoir_before) || reservoir_before < 0.0)
-        reservoir_before = 0.0;
+      const double reservoir_stored =
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p];
+      reservoir_before =
+        BHFeedbackReservoirStoredToCGS(reservoir_stored, energy_units);
     }
-    const PINT bh_id = ParticleNumber[p];
-    const double reservoir_diag_before = feedback_reservoir_diag_cache[bh_id];
-    const double reservoir_after = reservoir_diag_before + E_requested;
-    feedback_reservoir_diag_cache[bh_id] = reservoir_after;
-    const int burst_diag = (reservoir_after >= BHFeedbackMinEnergyBurst) ? 1 : 0;
+
+    double E_requested = 0.0;
+    double p_requested = 0.0;
+    double reservoir_after_accum = reservoir_before;
+    double reservoir_final = reservoir_before;
+    double E_burst = 0.0;
+    int burst_diag = 0;
+    int burst_occurred = 0;
+
+    if (thermal_mode && mdot_actual_code > 0.0) {
+      E_requested = BHFeedbackThermalEfficiency * L_feedback * dt_cgs;
+      if (!isfinite(E_requested) || E_requested < 0.0)
+        E_requested = 0.0;
+      reservoir_after_accum = reservoir_before + E_requested;
+      reservoir_final = reservoir_after_accum;
+      if (reservoir_after_accum >= BHFeedbackMinEnergyBurst) {
+        E_burst = reservoir_after_accum;
+        reservoir_final = 0.0;
+        burst_diag = 1;
+      }
+    }
+
+    if (this->ComputeTemperatureField(&temperature[0]) == FAIL)
+      ENZO_FAIL("Error in grid->ComputeTemperatureField for BH feedback.");
 
     const int i0 = int((bh_pos[0] - GridLeftEdge[0]) / cell_width);
     const int j0 = int((bh_pos[1] - GridLeftEdge[1]) / cell_width);
@@ -263,6 +323,8 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
     double kernel_gas_mass = 0.0;
     double temp_mass_sum = 0.0;
     double temp_weight_sum = 0.0;
+    std::vector<BHFeedbackKernelCell> feedback_cells;
+    feedback_cells.reserve(max(1, (2*rcell+1)*(2*rcell+1)*(2*rcell+1)));
 
     for (int k = max(0, k0-rcell); k <= min(nz-1, k0+rcell); k++)
       for (int j = max(0, j0-rcell); j <= min(ny-1, j0+rcell); j++)
@@ -275,8 +337,10 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
             continue;
 
           n_kernel_cells++;
-          if (i >= isx && i <= iex && j >= isy && j <= iey && k >= isz && k <= iez)
-            n_kernel_active_cells++;
+          if (i < isx || i > iex || j < isy || j > iey || k < isz || k > iez)
+            continue;
+
+          n_kernel_active_cells++;
 
           const int n = k*zo + j*yo + i*xo;
           const double rho = BaryonField[DensNum][n];
@@ -288,15 +352,121 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
           kernel_gas_mass += mcell;
           temp_mass_sum += mcell * temperature[n];
           temp_weight_sum += mcell;
+          feedback_cells.push_back(BHFeedbackKernelCell(n, mcell));
         }
 
     const double T_before_mean = (temp_weight_sum > 0.0) ? (temp_mass_sum / temp_weight_sum) : 0.0;
-    const double T_after_mean = T_before_mean;
-    const double E_deposited = 0.0;
+    double T_after_mean = T_before_mean;
+    double E_deposited = 0.0;
     const double p_deposited = 0.0;
-    const int n_sf_blocked_feedback = 0;
+    int n_sf_blocked_feedback = 0;
+    int kernel_gas_low = 0;
+    int kernel_gas_zero = 0;
+    double sum_deposited = 0.0;
+    double deposit_rel_err = 0.0;
+    double mass_weight_rel_err = 0.0;
+
+    if (E_burst > 0.0) {
+      if (feedback_cells.empty() || kernel_gas_mass <= 0.0) {
+        kernel_gas_zero = 1;
+        reservoir_final += E_burst;
+        E_burst = 0.0;
+        burst_diag = 1;
+      } else {
+        const double kernel_gas_msun = kernel_gas_mass * mass_to_msun;
+        if (kernel_gas_msun < BHFeedbackKernelMassWarnThreshold)
+          kernel_gas_low = 1;
+
+        double remaining_energy = E_burst;
+        double remaining_mass = kernel_gas_mass;
+        for (int c = 0; c < int(feedback_cells.size()); c++) {
+          const int n = feedback_cells[c].index;
+          const double mcell = feedback_cells[c].mass_code;
+          if (mcell <= 0.0)
+            continue;
+
+          double dE = 0.0;
+          if (c == int(feedback_cells.size()) - 1 || remaining_mass <= 0.0)
+            dE = remaining_energy;
+          else
+            dE = remaining_energy * (mcell / remaining_mass);
+
+          dE = max(0.0, dE);
+          remaining_energy -= dE;
+          remaining_mass -= mcell;
+          sum_deposited += dE;
+
+          if (E_burst > 0.0 && kernel_gas_mass > 0.0) {
+            const double expected_fraction = mcell / kernel_gas_mass;
+            const double actual_fraction = dE / E_burst;
+            const double frac_err = fabs(actual_fraction - expected_fraction);
+            if (frac_err > mass_weight_rel_err)
+              mass_weight_rel_err = frac_err;
+          }
+
+          if (dE <= 0.0)
+            continue;
+
+          const double de_specific = dE / (mcell * energy_units);
+          if (!isfinite(de_specific) || de_specific < 0.0)
+            ENZO_FAIL("BH feedback produced invalid thermal specific-energy increment.");
+
+          if (GENum >= 0 && DualEnergyFormalism) {
+            const double newGE = BaryonField[GENum][n] + de_specific;
+            BaryonField[GENum][n] = float(newGE);
+            BaryonField[TENum][n] = float(newGE);
+            if (HydroMethod != Zeus_Hydro) {
+              for (int dim = 0; dim < GridRank; dim++)
+                BaryonField[TENum][n] +=
+                  float(0.5 * BaryonField[Vel1Num+dim][n] *
+                        BaryonField[Vel1Num+dim][n]);
+            }
+          } else {
+            BaryonField[TENum][n] += float(de_specific);
+          }
+
+          if (BaryonField[NumberOfBaryonFields] != NULL) {
+            BaryonField[NumberOfBaryonFields][n] = 1.0f;
+            n_sf_blocked_feedback++;
+          }
+        }
+
+        deposit_rel_err = fabs(sum_deposited - E_burst) / E_burst;
+        if (deposit_rel_err > 1.0e-10)
+          ENZO_FAIL("BH feedback burst energy conservation violation.");
+
+        E_deposited = E_burst;
+        burst_occurred = (E_deposited > 0.0) ? 1 : 0;
+        reservoir_final = 0.0;
+
+        if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT)
+          ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT][p] = float(zred);
+
+        if (this->ComputeTemperatureField(&temperature[0]) == FAIL)
+          ENZO_FAIL("Error in grid->ComputeTemperatureField after BH feedback deposition.");
+
+        double temp_after_mass_sum = 0.0;
+        double temp_after_weight_sum = 0.0;
+        for (int c = 0; c < int(feedback_cells.size()); c++) {
+          const int n = feedback_cells[c].index;
+          const double mcell = feedback_cells[c].mass_code;
+          temp_after_mass_sum += mcell * temperature[n];
+          temp_after_weight_sum += mcell;
+        }
+        T_after_mean = (temp_after_weight_sum > 0.0) ?
+          (temp_after_mass_sum / temp_after_weight_sum) : 0.0;
+      }
+    }
+
+    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
+      if (!isfinite(reservoir_final) || reservoir_final < 0.0)
+        reservoir_final = 0.0;
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p] =
+        BHFeedbackReservoirCGSToStored(reservoir_final, energy_units);
+    }
 
     const double kernel_cells_per_radius = kernel_radius_code / cell_width;
+    const double dT_mean = T_after_mean - T_before_mean;
     if (BHFeedbackVerbose >= 1) {
       if (kernel_cells_per_radius < 1.5)
         fprintf(logptr,
@@ -308,24 +478,47 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
                 "[BHFDBK_WARN] step=%d level=%d bh_id=%lld kernel_radius_over_dx=%.6g "
                 "kernel may exceed ghost-zone support (>3 cells).\n",
                 cycle_number, level, (long long) ParticleNumber[p], kernel_cells_per_radius);
+      if (kernel_gas_low)
+        fprintf(logptr,
+                "[BHFDBK_WARN] step=%d level=%d bh_id=%lld kernel_gas_msun=%.8e "
+                "below BHFeedbackKernelMassWarnThreshold=%.8e Msun; depositing full burst.\n",
+                cycle_number, level, (long long) ParticleNumber[p],
+                kernel_gas_mass * mass_to_msun,
+                double(BHFeedbackKernelMassWarnThreshold));
+      if (kernel_gas_zero)
+        fprintf(logptr,
+                "[BHFDBK_WARN] step=%d level=%d bh_id=%lld kernel_gas_zero=1 "
+                "active-zone gas unavailable; returning burst energy to reservoir.\n",
+                cycle_number, level, (long long) ParticleNumber[p]);
+      if (dT_mean > 1.0e10)
+        fprintf(logptr,
+                "[BHFDBK_WARN] step=%d level=%d bh_id=%lld dT_mean=%.8e K "
+                "extreme feedback temperature jump.\n",
+                cycle_number, level, (long long) ParticleNumber[p], dT_mean);
 
       const double feedback_wall_ms = 1000.0 * (ReturnWallTime() - t0_all);
       fprintf(logptr,
               "[BHFDBK] step=%d level=%d z=%.8g bh_id=%lld bh_mass=%.8g "
               "feedback_mode=%s f_Edd=%.8e L_feedback=%.8e E_requested=%.8e "
-              "reservoir_before=%.8e reservoir_after=%.8e burst_diag=%d "
+              "reservoir_before=%.8e burst_diag=%d "
               "E_deposited=%.8e p_requested=%.8e p_deposited=%.8e "
               "feedback_kernel_cells=%d feedback_kernel_active_cells=%d "
               "feedback_kernel_gas_msun=%.8e "
               "T_before_mean=%.8e T_after_mean=%.8e n_sf_blocked_feedback=%d "
+              "reservoir_after_accum=%.8e reservoir_final=%.8e burst_occurred=%d "
+              "kernel_gas_low=%d kernel_gas_zero=%d dT_mean=%.8e "
+              "sum_deposited=%.8e deposit_rel_err=%.8e mass_weight_rel_err=%.8e "
               "newly_seeded_skip=0 feedback_wall_ms=%.4f\n",
               cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
               feedback_mode, f_edd, L_feedback, E_requested,
-              reservoir_before, reservoir_after, burst_diag,
+              reservoir_before, burst_diag,
               E_deposited, p_requested, p_deposited,
               n_kernel_cells, n_kernel_active_cells,
               kernel_gas_mass * mass_to_msun,
               T_before_mean, T_after_mean, n_sf_blocked_feedback,
+              reservoir_after_accum, reservoir_final, burst_occurred,
+              kernel_gas_low, kernel_gas_zero, dT_mean,
+              sum_deposited, deposit_rel_err, mass_weight_rel_err,
               feedback_wall_ms);
     }
   }
