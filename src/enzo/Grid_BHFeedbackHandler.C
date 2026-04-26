@@ -245,9 +245,11 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
                 "reservoir_after_accum=-1 reservoir_final=-1 burst_occurred=0 "
                 "kernel_gas_low=0 kernel_gas_zero=0 dT_mean=0 "
                 "sum_deposited=0 deposit_rel_err=0 mass_weight_rel_err=0 "
-                "newly_seeded_skip=1 feedback_wall_ms=%.4f\n",
+                "newly_seeded_skip=1 feedback_wall_ms=%.4f "
+                "cumul_reservoir_in_cgs=%.8e cumul_reservoir_out_cgs=%.8e "
+                "conservation_residual_cgs=%.8e\n",
                 cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
-                feedback_wall_ms);
+                feedback_wall_ms, 0.0, 0.0, 0.0);
       }
       continue;
     }
@@ -282,10 +284,10 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
 
     double reservoir_before = 0.0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
-      const double reservoir_stored =
+      const float reservoir_before_code =
         ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p];
       reservoir_before =
-        BHFeedbackReservoirStoredToCGS(reservoir_stored, energy_units);
+        BHFeedbackReservoirStoredToCGS(reservoir_before_code, energy_units);
     }
 
     double E_requested = 0.0;
@@ -300,6 +302,13 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       E_requested = BHFeedbackThermalEfficiency * L_feedback * dt_cgs;
       if (!isfinite(E_requested) || E_requested < 0.0)
         E_requested = 0.0;
+      const float E_requested_code =
+        BHFeedbackReservoirCGSToStored(E_requested, energy_units);
+#ifndef WINDS
+      if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN)
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN][p] +=
+          E_requested_code;
+#endif
       reservoir_after_accum = reservoir_before + E_requested;
       reservoir_final = reservoir_after_accum;
       if (reservoir_after_accum >= BHFeedbackMinEnergyBurst) {
@@ -458,12 +467,61 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       }
     }
 
-    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
-      if (!isfinite(reservoir_final) || reservoir_final < 0.0)
-        reservoir_final = 0.0;
-      ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p] =
-        BHFeedbackReservoirCGSToStored(reservoir_final, energy_units);
+    if (!isfinite(reservoir_final) || reservoir_final < 0.0)
+      reservoir_final = 0.0;
+
+    const float reservoir_after_accum_code =
+      BHFeedbackReservoirCGSToStored(reservoir_after_accum, energy_units);
+    const float reservoir_final_code =
+      BHFeedbackReservoirCGSToStored(reservoir_final, energy_units);
+
+#ifndef WINDS
+    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT) {
+      const double out_increment =
+        double(reservoir_after_accum_code) - double(reservoir_final_code);
+      if (out_increment > 0.0)
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT][p] +=
+          float(out_increment);
     }
+#endif
+
+    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p] =
+        reservoir_final_code;
+    }
+
+    double cumul_reservoir_in_cgs = 0.0;
+    double cumul_reservoir_out_cgs = 0.0;
+    double conservation_residual_cgs = 0.0;
+#ifndef WINDS
+    if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN &&
+        NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT) {
+      const float cumul_in =
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN][p];
+      const float cumul_out =
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT][p];
+      const float reservoir_current =
+        (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) ?
+        ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][p] :
+        reservoir_final_code;
+      const double residual_code =
+        double(cumul_in) - double(cumul_out) - double(reservoir_current);
+
+      cumul_reservoir_in_cgs =
+        BHFeedbackReservoirStoredToCGS(cumul_in, energy_units);
+      cumul_reservoir_out_cgs =
+        BHFeedbackReservoirStoredToCGS(cumul_out, energy_units);
+      conservation_residual_cgs =
+        (isfinite(residual_code) && energy_units > 0.0) ?
+        residual_code * energy_units : 0.0;
+
+      if (cumul_reservoir_in_cgs > 0.0 &&
+          fabs(conservation_residual_cgs) > 1.0e-5 * cumul_reservoir_in_cgs)
+        fprintf(stderr, "WARNING: BH feedback conservation residual %.6e "
+                "exceeds 1e-5 of cumulative input %.6e\n",
+                conservation_residual_cgs, cumul_reservoir_in_cgs);
+    }
+#endif
 
     const double kernel_cells_per_radius = kernel_radius_code / cell_width;
     const double dT_mean = T_after_mean - T_before_mean;
@@ -508,7 +566,9 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
               "reservoir_after_accum=%.8e reservoir_final=%.8e burst_occurred=%d "
               "kernel_gas_low=%d kernel_gas_zero=%d dT_mean=%.8e "
               "sum_deposited=%.8e deposit_rel_err=%.8e mass_weight_rel_err=%.8e "
-              "newly_seeded_skip=0 feedback_wall_ms=%.4f\n",
+              "newly_seeded_skip=0 feedback_wall_ms=%.4f "
+              "cumul_reservoir_in_cgs=%.8e cumul_reservoir_out_cgs=%.8e "
+              "conservation_residual_cgs=%.8e\n",
               cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
               feedback_mode, f_edd, L_feedback, E_requested,
               reservoir_before, burst_diag,
@@ -519,7 +579,8 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
               reservoir_after_accum, reservoir_final, burst_occurred,
               kernel_gas_low, kernel_gas_zero, dT_mean,
               sum_deposited, deposit_rel_err, mass_weight_rel_err,
-              feedback_wall_ms);
+              feedback_wall_ms, cumul_reservoir_in_cgs,
+              cumul_reservoir_out_cgs, conservation_residual_cgs);
     }
   }
 
