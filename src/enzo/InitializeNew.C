@@ -340,6 +340,7 @@ int InitializeNew(char *filename, HierarchyEntry &TopGrid,
                                  PARTICLE_ATTRIBUTE_BHACCR_REQUIRED);
   if (BHFeedbackMethod)
     required_bh_attributes = max(required_bh_attributes,
+                                 /* non-WINDS Phase C cumulative reservoir slots */
                                  PARTICLE_ATTRIBUTE_BHFDBK_REQUIRED);
 
   if (required_bh_attributes > 0 &&
