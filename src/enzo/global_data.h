@@ -1171,6 +1171,7 @@ EXTERN float BHAccretionIgnoredPFracWarn;        // warning threshold (dimension
 EXTERN int   BHFeedbackMethod;                   // 0=off, 1=thermal framework, 2=two-mode scaffold
 EXTERN float BHFeedbackModeThreshold;            // f_Edd threshold for thermal mode
 EXTERN float BHFeedbackKernelRadius;             // physical kpc
+EXTERN float BHFeedbackEddingtonFactor;          // multiplier on existing Eddington cap
 EXTERN float BHFeedbackThermalEfficiency;        // thermal coupling epsilon_f
 EXTERN double BHFeedbackMinEnergyBurst;          // burst threshold (erg)
 EXTERN float BHFeedbackKernelMassWarnThreshold;  // gas-poor warning threshold (Msun)
