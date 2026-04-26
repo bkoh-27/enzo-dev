@@ -487,15 +487,23 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       mdot_edd_code = mdot_edd_cgs * TimeUnits / mass_units;
     }
 
-    const double f_edd = (mdot_edd_code > 0.0) ? mdot_total_raw / mdot_edd_code : 0.0;
+    const double lambda_edd =
+      (mdot_edd_code > 0.0) ? mdot_total_raw / mdot_edd_code : 0.0;
+    const double f_edd = lambda_edd;
 
     double frac_cap = 1.0;
-    int cap_active = 0;
-    if (mdot_edd_code > 0.0 && mdot_total_raw > mdot_edd_code) {
-      frac_cap = mdot_edd_code / mdot_total_raw;
-      cap_active = 1;
+    if (mdot_edd_code > 0.0 && mdot_total_raw > 0.0) {
+      if (BHFeedbackEddingtonFactor == 1.0f) {
+        /* Exact Phase B path: no Eddington-factor multiply at default. */
+        frac_cap = min(1.0, mdot_edd_code / mdot_total_raw);
+      } else {
+        const double mdot_edd_effective =
+          double(BHFeedbackEddingtonFactor) * mdot_edd_code;
+        frac_cap = min(1.0, mdot_edd_effective / mdot_total_raw);
+      }
     }
     frac_cap = min(1.0, max(0.0, frac_cap));
+    const int cap_active = (frac_cap < 1.0) ? 1 : 0;
 
     const double mdot_hot_capped = mdot_hot_raw * frac_cap;
     const double mdot_cold_capped = mdot_cold_raw * frac_cap;
@@ -927,7 +935,7 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "Mdot_hot_realized=%.8e Mdot_cold_realized=%.8e bh_mass_new=%.8g "
               "removal_cells=%d n_sf_blocked_cells=%d "
               "acc_ignored_dv_kms=%.8g acc_ignored_p_frac=%.8g acc_momentum_warn=%d "
-              "accretion_wall_ms=%.4f\n",
+              "accretion_wall_ms=%.4f lambda_edd=%.8e edd_factor=%.8g\n",
               cycle_number, level, zred, (long long) ParticleNumber[p], bh_mass_msun,
               f_hot, f_cold, n_hot_cells, n_cold_cells, n_fallback_cells,
               hot_rho_avg * rho_to_cgs, cold_rho_avg * rho_to_cgs,
@@ -950,7 +958,7 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               bh_mass_new_msun,
               removal_cells, n_sf_blocked_cells,
               acc_ignored_dv_kms, acc_ignored_p_frac, acc_momentum_warn,
-              accretion_wall_ms);
+              accretion_wall_ms, lambda_edd, double(BHFeedbackEddingtonFactor));
     }
   }
 
