@@ -496,7 +496,7 @@ Hard startup errors:
 - `BHAccretionMethod` must be `0` or `1`.
 - `BHAccretionKernelRadius > 0`.
 - `BHAccretionCVisc > 0`.
-- `0 < BHAccretionRadiativeEfficiency < 1`.
+- `0 < BHAccretionRadiativeEfficiency <= 1`.
 - `BHAccretionColdModel == 0` (Phase A restriction).
 
 Runtime warning examples (`[BHACCR_WARN]`):
@@ -609,6 +609,15 @@ Phase B appends:
 - `removal_cells`, `n_sf_blocked_cells`,
 - `acc_ignored_dv_kms`, `acc_ignored_p_frac`, `acc_momentum_warn`,
 - `accretion_wall_ms`.
+
+### Phase C `[BHACCR]` Fields
+Phase C appends:
+- `lambda_edd`: raw `Mdot_total_raw / Mdot_Edd`, using the physical Eddington
+  rate before `BHFeedbackEddingtonFactor` is applied,
+- `edd_factor`: runtime value of `BHFeedbackEddingtonFactor`.
+
+These are appended to the end of the line. Existing Phase A/B fields are not
+renamed or reordered.
 
 ### Phase B Warning Lines (`[BHACCR_WARN]`)
 - gas-limited removal (`removal_gas_limited=1`),
@@ -804,7 +813,8 @@ E_requested = BHFeedbackThermalEfficiency
             * dt
 ```
 
-The reservoir is stored in erg. When
+The reservoir is stored in code energy units in the particle attribute, with
+CGS erg conversion at the feedback handler's read/write boundaries. When
 `BHFeedbackEnergyReservoir >= BHFeedbackMinEnergyBurst`, the full reservoir is
 selected as one burst. A successful burst deposits the full stored energy and
 sets the reservoir to zero. There is no partial drain or minimum temperature
@@ -863,7 +873,7 @@ If no active-zone gas deposition cells are available, the handler logs
 
 ### Metadata and Restart
 - `BHFeedbackEnergyReservoir` is checkpointed as a particle scalar and is the
-  only Phase B reservoir state.
+  Phase B reservoir state. It is stored in code energy units, not erg.
 - `BHLastFeedbackRedshift` is updated only when `E_deposited > 0`.
 - On restart, accumulation continues from the stored reservoir value; burst
   timing is therefore restart-consistent up to the float precision of the
@@ -882,6 +892,7 @@ There is no Phase B inter-grid communication for feedback deposition.
 | `BHFeedbackMethod` | `0` | active (`0` off, `1` thermal active, `2` thermal active with kinetic inactive) |
 | `BHFeedbackModeThreshold` | `0.01` | active thermal/kinetic-inactive threshold |
 | `BHFeedbackKernelRadius` | `1.0` | active, physical kpc |
+| `BHFeedbackEddingtonFactor` | `1.0` | Phase C multiplier on the existing Eddington cap |
 | `BHFeedbackThermalEfficiency` | `0.02` | active thermal coupling efficiency |
 | `BHFeedbackMinEnergyBurst` | `1e50` | active fixed burst threshold, erg |
 | `BHFeedbackKernelMassWarnThreshold` | `1e3` | active gas-poor warning threshold, Msun |
@@ -891,9 +902,12 @@ There is no Phase B inter-grid communication for feedback deposition.
 | `BHFeedbackVerbose` | `1` | active |
 
 Validation hard-errors if `BHFeedbackMethod` is not in `{0,1,2}`,
-`BHFeedbackKernelRadius <= 0`, `BHFeedbackThermalEfficiency` is outside
-`[0,1]`, `BHFeedbackMinEnergyBurst <= 0`, or
-`BHFeedbackKernelMassWarnThreshold <= 0`.
+`BHFeedbackKernelRadius <= 0`, `BHFeedbackEddingtonFactor < 0`,
+`BHFeedbackThermalEfficiency` is outside `[0,1]`,
+`BHAccretionRadiativeEfficiency * BHFeedbackThermalEfficiency > 1`,
+`BHFeedbackMinEnergyBurst <= 0`, or `BHFeedbackKernelMassWarnThreshold <= 0`.
+`BHFeedbackEddingtonFactor = 0` warns and prevents BH accretion; values above
+`100` warn that the cap is effectively disabled.
 
 ### Phase B `[BHFDBK]` Fields
 Phase B preserves the Phase A fields and adds:
@@ -910,6 +924,69 @@ Phase B preserves the Phase A fields and adds:
 
 `E_deposited`, `T_after_mean`, and `n_sf_blocked_feedback` are no longer
 diagnostic placeholders in Phase B.
+
+## BH Feedback Phase C (Eddington Factor and Reservoir Diagnostics)
+
+Phase C adds diagnostics and one Eddington-control parameter. It does not add
+new efficiency parameters and does not multiply another efficiency into the
+Phase B feedback-energy formula.
+
+### Eddington Factor
+`BHFeedbackEddingtonFactor` multiplies the existing Eddington cap in the
+accretion handler:
+
+```text
+Mdot_cap = BHFeedbackEddingtonFactor * Mdot_Edd
+```
+
+The default is `1.0`. At the default, the code uses the original Phase B cap
+expression path rather than relying on a `1.0 * Mdot_Edd` multiply. Values below
+`1.0` tighten the cap; values above `1.0` allow proportionally
+super-Eddington requested accretion.
+
+`lambda_edd` in `[BHACCR]` remains the raw accretion estimate divided by the
+physical Eddington rate, not the factor-modified cap. `edd_factor` records the
+runtime factor for traceability.
+
+### Cumulative Reservoir Counters
+Phase C adds two non-WINDS particle attributes:
+
+- `BHCumulativeReservoirIn`: cumulative stored-code-energy added to the
+  feedback reservoir.
+- `BHCumulativeReservoirOut`: cumulative stored-code-energy actually removed
+  from the reservoir after the burst path fully resolves.
+
+Both counters are float-backed ParticleAttributes, the same storage class as
+the reservoir. They are diagnostic bug detectors for catching missing,
+double-counted, or wrong-sign updates. They are not high-precision long-run
+energy-conservation accounting. Once a float32 cumulative counter is large
+enough, small later increments can round away.
+
+Newly created BH particles initialize both counters to `0.0` in
+`Grid_BHSeedHandler.C` (`BHSeedCreateLocalBestParticle` and
+`BHSeedCreateAcceptedCandidate`). For pre-Phase-C restarts where
+`BHCumulativeReservoirIn` is missing, the reader initializes it to the current
+`BHFeedbackEnergyReservoir` value so the conservation residual starts from zero
+at the restart boundary. Missing `BHCumulativeReservoirOut` initializes to
+`0.0`; pre-Phase-C history is not reconstructed.
+
+### Conservation Residual
+Each `[BHFDBK]` line appends:
+
+- `cumul_reservoir_in_cgs`,
+- `cumul_reservoir_out_cgs`,
+- `conservation_residual_cgs`.
+
+The residual is
+
+```text
+BHCumulativeReservoirIn - BHCumulativeReservoirOut - BHFeedbackEnergyReservoir
+```
+
+converted from stored code energy to erg for logging. A warning is emitted when
+the absolute residual exceeds `1e-5` of the cumulative input. This threshold is
+a practical implementation check; float32 accumulation can still drift in long
+runs.
 
 ### Unit Conversion Path
 `BHLastMdotActual` is written by the accretion handler in code mass per code
