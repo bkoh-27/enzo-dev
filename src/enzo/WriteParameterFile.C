@@ -1138,6 +1138,8 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
   fprintf(fptr, "BHFeedbackModeThreshold     = %"GOUTSYM"\n", BHFeedbackModeThreshold);
   fprintf(fptr, "BHFeedbackKernelRadius      = %"GOUTSYM"  # physical kpc\n",
           BHFeedbackKernelRadius);
+  fprintf(fptr, "BHFeedbackEddingtonFactor   = %"GOUTSYM"\n",
+          BHFeedbackEddingtonFactor);
   fprintf(fptr, "BHFeedbackThermalEfficiency = %"GOUTSYM"\n",
           BHFeedbackThermalEfficiency);
   fprintf(fptr, "BHFeedbackMinEnergyBurst    = %.15e  # erg\n",

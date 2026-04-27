@@ -52,6 +52,7 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
 		   int ReadText, int ReadData)
 {
   static int warned_missing_particle_attribute = FALSE;
+  static int warned_missing_bh_cumul_reservoir_in = FALSE;
   bool TryHDF5 = TRUE; 
   int i, j, k, dim, field, size, active_size;
   char name[MAX_LINE_LENGTH], dummy[MAX_LINE_LENGTH];
@@ -101,8 +102,10 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
        "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
-       "bhfdbk_last_feedback_redshift", "particle_attribute_20",
-       "particle_attribute_21", "particle_attribute_22",
+       "bhfdbk_last_feedback_redshift",
+       "bh_cumul_reservoir_in",  /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN */
+       "bh_cumul_reservoir_out", /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT */
+       "particle_attribute_22",
        "particle_attribute_23"};
 #endif
 
@@ -790,9 +793,30 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
 	  if (ReadField(ParticleAttribute[j], &NumberOfParticles, 1, name,
 			ParticleAttributeLabel[j]) == FAIL) {
 	    if (j >= 3) {
+#ifndef WINDS
+	      if (j == PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN) {
+		for (i = 0; i < NumberOfParticles; i++)
+		  ParticleAttribute[j][i] =
+		    ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][i];
+		if (!warned_missing_bh_cumul_reservoir_in &&
+		    MyProcessorNumber == ROOT_PROCESSOR) {
+		  fprintf(stderr, "BHCumulativeReservoirIn missing in restart; "
+			  "initialized to current reservoir value. "
+			  "Pre-Phase-C history not tracked.\n");
+		  warned_missing_bh_cumul_reservoir_in = TRUE;
+		}
+	      } else {
+#endif
 	      for (i = 0; i < NumberOfParticles; i++)
 		ParticleAttribute[j][i] = 0;
-	      if (!warned_missing_particle_attribute &&
+#ifndef WINDS
+	      }
+#endif
+	      if (
+#ifndef WINDS
+		  j != PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN &&
+#endif
+		  !warned_missing_particle_attribute &&
 		  MyProcessorNumber == ROOT_PROCESSOR) {
 		fprintf(stderr, "INFO [MBHFB]: missing particle attribute '%s' "
 			"in %s; zero-initializing this slot.\n",
@@ -1057,8 +1081,27 @@ int grid::ReadGrid(FILE *fptr, int GridID, char DataFilename[],
 		ParticleAttribute[j][i] = float(temp[i]);
 	    } else {
 	      for (i = 0; i < NumberOfParticles; i++)
-		ParticleAttribute[j][i] = 0;
-	      if (!warned_missing_particle_attribute &&
+		ParticleAttribute[j][i] =
+#ifndef WINDS
+		  (j == PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN) ?
+		  ParticleAttribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR][i] :
+#endif
+		  0;
+#ifndef WINDS
+	      if (j == PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN &&
+		  !warned_missing_bh_cumul_reservoir_in &&
+		  MyProcessorNumber == ROOT_PROCESSOR) {
+		fprintf(stderr, "BHCumulativeReservoirIn missing in restart; "
+			"initialized to current reservoir value. "
+			"Pre-Phase-C history not tracked.\n");
+		warned_missing_bh_cumul_reservoir_in = TRUE;
+	      }
+#endif
+	      if (
+#ifndef WINDS
+		  j != PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN &&
+#endif
+		  !warned_missing_particle_attribute &&
 		  MyProcessorNumber == ROOT_PROCESSOR) {
 		fprintf(stderr, "INFO [MBHFB]: missing particle attribute '%s' "
 			"in %s; zero-initializing this slot.\n",

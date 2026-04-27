@@ -113,8 +113,8 @@ int grid::Group_ReadGrid(FILE *fptr, int GridID, HDF5_hid_t file_id,
      "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
      "bhaccr_last_eddington_ratio", "bh_formation_mass",
      "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
-     "bhfdbk_last_feedback_redshift", "particle_attribute_20",
-     "particle_attribute_21", "particle_attribute_22",
+     "bhfdbk_last_feedback_redshift", "bh_cumul_reservoir_in",
+     "bh_cumul_reservoir_out", "particle_attribute_22",
      "particle_attribute_23"};
 #endif
 

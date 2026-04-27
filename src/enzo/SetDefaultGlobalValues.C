@@ -797,6 +797,7 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHFeedbackMethod                 = 0;
   BHFeedbackModeThreshold          = 0.01;
   BHFeedbackKernelRadius           = 1.0;    // physical kpc
+  BHFeedbackEddingtonFactor        = 1.0f;
   BHFeedbackThermalEfficiency      = 0.02;
   BHFeedbackMinEnergyBurst         = 1.0e50; // erg
   BHFeedbackKernelMassWarnThreshold = 1.0e3; // Msun

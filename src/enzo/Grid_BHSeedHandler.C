@@ -713,6 +713,12 @@ int BHSeedCreateLocalBestParticle()
     p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR] = 0.0f;
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT)
     p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT] = -1.0f;
+#ifndef WINDS
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT] = 0.0f;
+#endif
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;
@@ -1100,6 +1106,12 @@ int BHSeedCreateAcceptedCandidate(const BHSeedCandidate &cand,
     p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR] = 0.0f;
   if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT)
     p.Attribute[PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT] = -1.0f;
+#ifndef WINDS
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN] = 0.0f;
+  if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT)
+    p.Attribute[PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT] = 0.0f;
+#endif
 
   if (GridData->AddOneParticleFromList(&p, 0) == FAIL)
     return FAIL;

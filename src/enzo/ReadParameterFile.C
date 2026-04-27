@@ -1173,6 +1173,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
                   &BHFeedbackModeThreshold);
     ret += sscanf(line, "BHFeedbackKernelRadius = %"FSYM,
                   &BHFeedbackKernelRadius);
+    ret += sscanf(line, "BHFeedbackEddingtonFactor = %"FSYM,
+                  &BHFeedbackEddingtonFactor);
     ret += sscanf(line, "BHFeedbackThermalEfficiency = %"FSYM,
                   &BHFeedbackThermalEfficiency);
     ret += sscanf(line, "BHFeedbackMinEnergyBurst = %lf",
@@ -2279,8 +2281,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     if (BHAccretionCVisc <= 0.0f)
       ENZO_FAIL("BHAccretionCVisc must be positive.");
     if (BHAccretionRadiativeEfficiency <= 0.0f ||
-        BHAccretionRadiativeEfficiency >= 1.0f)
-      ENZO_FAIL("BHAccretionRadiativeEfficiency must satisfy 0 < epsilon_r < 1.");
+        BHAccretionRadiativeEfficiency > 1.0f)
+      ENZO_FAIL("BHAccretionRadiativeEfficiency must satisfy 0 < epsilon_r <= 1.");
     if (BHAccretionColdModel != 0)
       ENZO_FAIL("BHAccretionColdModel must be 0 in Phase B (AM-suppressed Bondi).");
   }
@@ -2301,8 +2303,19 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ENZO_FAIL("BHFeedbackMethod must be 0 (off), 1 (thermal framework), or 2 (full two-mode scaffold).");
   if (BHFeedbackKernelRadius <= 0.0f)
     ENZO_FAIL("BHFeedbackKernelRadius must be positive (units: physical kpc).");
+  if (BHFeedbackEddingtonFactor < 0.0f)
+    ENZO_FAIL("BHFeedbackEddingtonFactor must be >= 0");
+  if (BHFeedbackEddingtonFactor == 0.0f && MyProcessorNumber == ROOT_PROCESSOR)
+    fprintf(stderr, "WARNING: BHFeedbackEddingtonFactor = 0; "
+            "BH cannot accrete.\n");
+  if (BHFeedbackEddingtonFactor > 100.0f && MyProcessorNumber == ROOT_PROCESSOR)
+    fprintf(stderr, "WARNING: BHFeedbackEddingtonFactor > 100; "
+            "Eddington cap effectively disabled.\n");
   if (BHFeedbackThermalEfficiency < 0.0f || BHFeedbackThermalEfficiency > 1.0f)
     ENZO_FAIL("BHFeedbackThermalEfficiency must satisfy 0 <= epsilon_f <= 1.");
+  if (BHAccretionRadiativeEfficiency * BHFeedbackThermalEfficiency > 1.0f)
+    ENZO_FAIL("Product BHAccretionRadiativeEfficiency * "
+              "BHFeedbackThermalEfficiency exceeds 1.0");
   if (BHFeedbackMinEnergyBurst <= 0.0f)
     ENZO_FAIL("BHFeedbackMinEnergyBurst must be positive (erg).");
   if (BHFeedbackKernelMassWarnThreshold <= 0.0f)
