@@ -5,6 +5,10 @@ This script is validation-only. It copies TS3_wrap parameter files into an
 output directory, applies per-case overrides there, and never edits source
 inputs in place.
 
+BH seeding, accretion, and feedback are opt-in in source defaults. The TS3_wrap
+base fixture explicitly sets BHSeedingMethod=1, and this harness explicitly
+sets BHAccretionMethod=1 and BHFeedbackMethod=1 in cases that require them.
+
 Environment overrides:
   BH_FEEDBACK_PHASEC_OUT_ROOT   Output root. Default:
                                 /tmp/bh_feedback_phaseC_tests/<timestamp>
@@ -291,6 +295,9 @@ def make_text(base, overrides, remove_keys=()):
 
 
 def baseline_overrides(**overrides):
+    # TS3_wrap explicitly sets BHSeedingMethod=1. Accretion and feedback
+    # defaults are opt-in, so every Phase C case that needs them enables them
+    # here rather than relying on source defaults.
     params = {
         "BHAccretionMethod": 1,
         "BHAccretionRunEveryTimestep": 1,

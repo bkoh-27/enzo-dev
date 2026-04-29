@@ -58,6 +58,10 @@ All claims below are source-confirmed. File references use the form
 `ReadParameterFile.C:1096-1124` (parsing), `SetDefaultGlobalValues.C:747-770`
 (defaults), `ReadParameterFile.C:2240-2250` (validation).
 
+Source default is `BHSeedingMethod = 0`; seeding is disabled unless explicitly
+enabled. Any D0a/D0b/D0c validation run or science parameter file that requires
+seed creation must set `BHSeedingMethod = 1` rather than relying on defaults.
+
 **Gate order** (star_maker_bh_seed.C:49-166):
 
 | Order | Gate | Parameter | Default | Notes |
@@ -232,7 +236,7 @@ acc_ignored_p_frac), lambda_edd, edd_factor.
 
 | Parameter | Default | Units | Validation |
 |-----------|---------|-------|------------|
-| BHAccretionMethod | 1 | — | {0,1} |
+| BHAccretionMethod | 0 | — | {0,1} |
 | BHAccretionKernelRadius | 3.0 | physical kpc | > 0 |
 | BHAccretionRemovalRadius | 1 | cell widths | — |
 | BHAccretionRemovalMode | 0 | — | — |
@@ -246,6 +250,10 @@ acc_ignored_p_frac), lambda_edd, edd_factor.
 | BHAccretionRunEveryTimestep | 0 | — | {0,1} |
 | BHAccretionIgnoredDVWarn | 1.0 | km/s | ≥ 0 |
 | BHAccretionIgnoredPFracWarn | 0.01 | — | ≥ 0 |
+
+Source default is `BHAccretionMethod = 0`; the new accretion/source path is
+disabled unless explicitly enabled. Any D0a/D0b/D0c validation run requiring
+BH accretion diagnostics or gas removal must set `BHAccretionMethod = 1`.
 
 **HDF5/restart particle attributes** (non-WINDS):
 
@@ -554,6 +562,21 @@ on paper scope.
 | A5 | Low-density or high-M_BH forcing frac_gas < 1. | frac_gas < 1; removal_gas_limited=1; M_BH grows by dm_removed only | D0c |
 | A6 | Long run (100+ steps). Verify mass bookkeeping invariant. | Runtime ENZO_FAIL never triggers; post-hoc check confirms | D0c |
 
+**D0c-acc0 feasibility probe baseline:** The run-only A1/A2/A5 probe should
+start from `origin/main = 52748626aaea390ac6218d784ecac6430595e6ec`, not the
+older D0b-lite baseline. Since seeding, accretion, and feedback are opt-in,
+copied TS3_wrap probe configurations that require a seeded/accreting BH and
+feedback diagnostics must explicitly include:
+
+```
+BHSeedingMethod   = 1
+BHAccretionMethod = 1
+BHFeedbackMethod  = 1
+```
+
+This applies to D0c-acc A1/A2/A5 probe cases unless a case is intentionally
+testing disabled seeding, disabled accretion, or disabled feedback behavior.
+
 **Correct framing for A1:** See Section 5A. This is a formula/unit-regime
 check, not hydrodynamic Bondi-flow validation.
 
@@ -753,9 +776,12 @@ Acceptance criteria for fields included in the hard comparison (see Section
 ### 5C. D0b-lite F1 Burst Configuration
 
 D0b-lite F1 base: TS3_wrap copied into the output directory, with feedback
-explicitly enabled. Base configuration:
+explicitly enabled. TS3_wrap explicitly sets `BHSeedingMethod = 1`; the
+D0a/D0b-lite harness also explicitly enables accretion and feedback because
+the source defaults are opt-in. Base configuration:
 
 ```
+BHSeedingMethod = 1
 BHAccretionMethod = 1
 BHAccretionRunEveryTimestep = 1
 BHAccretionVerbose = 1
