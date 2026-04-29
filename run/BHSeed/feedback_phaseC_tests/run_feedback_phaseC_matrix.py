@@ -115,6 +115,14 @@ EVOLVED_BH_FLOAT_RTOL = 2e-5
 RESTART_FLOAT_ATOL = 1e-12
 T10_SHORT_RTOL = 1e-10
 T10_ABS_TOL = 1e-30
+D0C_ACC_BONDI_RTOL = 1e-6
+D0C_ACC_STRICT_RTOL = 1e-8
+D0C_ACC_STRICT_ATOL = 1e-30
+D0C_F6_MIN_MISMATCH = 0.9
+
+CGS_GRAV_CONST = 6.67428e-8
+CGS_SOLAR_MASS = 1.9891e33
+CGS_YR_S = 3.1556952e7
 
 T7_RESTART_FIELDS = (
     "ParticleMass",
@@ -195,6 +203,29 @@ T10_BHFDBK_CATEGORICAL_FIELDS = (
     "burst_diag",
     "burst_occurred",
     "kernel_gas_zero",
+)
+
+D0C_ACC_REQUIRED_FIELDS = (
+    "bh_mass",
+    "f_hot",
+    "f_cold",
+    "f_AM",
+    "rho_cold_avg",
+    "cs_cold_avg",
+    "v_rel_cold",
+    "Mdot_hot_raw",
+    "Mdot_cold_raw",
+    "Mdot_total_raw",
+    "Mdot_Edd",
+    "Mdot_actual",
+    "cap_active",
+    "frac_cap",
+    "frac_gas",
+    "dm_requested",
+    "dm_removed",
+    "removal_gas_limited",
+    "lambda_edd",
+    "edd_factor",
 )
 
 
@@ -325,6 +356,23 @@ def d0b_burst_overrides(**overrides):
 
 def d0b_no_burst_overrides(**overrides):
     params = baseline_overrides(BHFeedbackMinEnergyBurst="1e50")
+    params.update(overrides)
+    return params
+
+
+def d0c_acc_base_overrides(**overrides):
+    params = baseline_overrides(
+        BHSeedingMethod=1,
+        BHAccretionMethod=1,
+        BHAccretionRunEveryTimestep=1,
+        BHAccretionVerbose=1,
+        BHFeedbackMethod=1,
+        BHFeedbackModeThreshold="1e-10",
+        BHFeedbackMinEnergyBurst="1e50",
+        BHFeedbackVerbose=1,
+        SelfGravity=0,
+        BHFeedbackEddingtonFactor=100,
+    )
     params.update(overrides)
     return params
 
@@ -1074,6 +1122,337 @@ def validate_d0b_f3(case, f1_result):
         name,
         f"checked {len(rows)} THERMAL rows; max_abs_residual={max_abs_residual:.8e} "
         f"max_tolerance={max_tolerance:.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def seed_created_total(log):
+    seed_rows = rows_for(log, "[BHSEED]", min_step=0)
+    if not seed_rows:
+        return None
+    total = 0
+    for row in seed_rows:
+        if is_finite_number(row.get("created")):
+            total += int(row["created"])
+    return total
+
+
+def validate_case_completed(name, case):
+    if case.timed_out:
+        return f"{name} run timed out after {CASE_TIMEOUT}s"
+    if case.rc != 0:
+        return f"{name} run exited rc={case.rc}"
+    return ""
+
+
+def required_field_errors(row, fields):
+    missing = [field for field in fields if field not in row]
+    non_finite = [
+        field for field in fields
+        if field in row and not is_finite_number(row[field])
+    ]
+    errors = []
+    if missing:
+        errors.append(
+            f"missing required [BHACCR] fields {missing}: {row.get('__line', '')}"
+        )
+    if non_finite:
+        errors.append(
+            f"non-finite required [BHACCR] fields {non_finite}: {row.get('__line', '')}"
+        )
+    return errors
+
+
+def select_d0c_acc_row(rows, name, predicate):
+    candidates = [row for row in rows if predicate(row)]
+    if not candidates:
+        return None, f"{name}: no [BHACCR] row matched requested regime"
+    return candidates[0], ""
+
+
+def assert_close(errors, label, actual, expected, rel_tol, abs_tol=D0C_ACC_STRICT_ATOL):
+    if not math.isclose(float(actual), float(expected), rel_tol=rel_tol, abs_tol=abs_tol):
+        rel = relative_diff(float(actual), float(expected))
+        errors.append(
+            f"{label}: actual={actual:.12e} expected={expected:.12e} "
+            f"rel_diff={rel:.8e} rel_tol={rel_tol:.8e}"
+        )
+
+
+def d0c_bondi_mdot_msunyr(row):
+    bh_mass_g = float(row["bh_mass"]) * CGS_SOLAR_MASS
+    rho = float(row["rho_cold_avg"])
+    cs = float(row["cs_cold_avg"])
+    v_rel = float(row["v_rel_cold"])
+    denom = (cs * cs + v_rel * v_rel) ** 1.5
+    if denom <= 0.0:
+        return math.nan
+    mdot_g_s = (
+        float(row["f_AM"]) * 4.0 * math.pi * CGS_GRAV_CONST * CGS_GRAV_CONST *
+        bh_mass_g * bh_mass_g * rho / denom
+    )
+    return mdot_g_s * CGS_YR_S / CGS_SOLAR_MASS
+
+
+def validate_d0c_a1(case):
+    name = "D0c-acc A1 Bondi formula/unit"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    rows = bhaccr_rows(case.log)
+    row, row_error = select_d0c_acc_row(
+        rows,
+        name,
+        lambda item: is_finite_number(item.get("Mdot_cold_raw")) and
+        float(item["Mdot_cold_raw"]) > 0.0,
+    )
+    if row is None:
+        return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
+
+    errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
+    seed_total = seed_created_total(case.log)
+    if seed_total is not None and seed_total != 1:
+        errors.append(f"seed_created_total={seed_total} expected 1")
+    if not errors:
+        if float(row["f_hot"]) != 0.0:
+            errors.append(f"f_hot={row['f_hot']} expected 0")
+        assert_close(errors, "f_cold", float(row["f_cold"]), 1.0, 0.0, 0.0)
+        assert_close(errors, "f_AM", float(row["f_AM"]), 1.0, 0.0, 0.0)
+        assert_close(errors, "Mdot_hot_raw", float(row["Mdot_hot_raw"]), 0.0, 0.0, 0.0)
+        if float(row["Mdot_cold_raw"]) <= 0.0:
+            errors.append(f"Mdot_cold_raw={row['Mdot_cold_raw']} expected > 0")
+        assert_close(
+            errors, "Mdot_total_raw", float(row["Mdot_total_raw"]),
+            float(row["Mdot_cold_raw"]), D0C_ACC_STRICT_RTOL,
+        )
+        if int(row["cap_active"]) != 0:
+            errors.append(f"cap_active={row['cap_active']} expected 0")
+        assert_close(errors, "frac_gas", float(row["frac_gas"]), 1.0, 1e-12, 1e-12)
+        if int(row["removal_gas_limited"]) != 0:
+            errors.append(
+                f"removal_gas_limited={row['removal_gas_limited']} expected 0"
+            )
+        if float(row["rho_cold_avg"]) <= 0.0:
+            errors.append(f"rho_cold_avg={row['rho_cold_avg']} expected > 0")
+        if float(row["cs_cold_avg"]) <= 0.0:
+            errors.append(f"cs_cold_avg={row['cs_cold_avg']} expected > 0")
+
+    analytic = math.nan
+    rel_error = math.nan
+    if not errors:
+        analytic = d0c_bondi_mdot_msunyr(row)
+        logged = float(row["Mdot_cold_raw"])
+        rel_error = relative_diff(analytic, logged)
+        if not math.isfinite(analytic):
+            errors.append("analytic Mdot_cold_raw is non-finite")
+        elif rel_error > D0C_ACC_BONDI_RTOL:
+            errors.append(
+                f"analytic Mdot_cold_raw={analytic:.12e} logged={logged:.12e} "
+                f"relative_error={rel_error:.8e} exceeds {D0C_ACC_BONDI_RTOL:.8e}"
+            )
+
+    metrics = {
+        "seed_created_total": seed_total,
+        "row": compact_row(row, D0C_ACC_REQUIRED_FIELDS),
+        "analytic_mdot_cold_raw": analytic,
+        "logged_mdot_cold_raw": row.get("Mdot_cold_raw"),
+        "relative_error": rel_error,
+        "formula": (
+            "f_AM*4*pi*G^2*M_bh^2*rho_cold_avg/"
+            "(cs_cold_avg^2+v_rel_cold^2)^(3/2)"
+        ),
+        "unit_convention": {
+            "rho_cold_avg": "g/cm^3",
+            "cs_cold_avg": "cm/s",
+            "v_rel_cold": "cm/s",
+            "bh_mass": "Msun",
+            "Mdot_cold_raw": "Msun/yr",
+        },
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"analytic/logged relative_error={rel_error:.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_a2(case):
+    name = "D0c-acc A2 Eddington cap activation"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    rows = bhaccr_rows(case.log)
+    row, row_error = select_d0c_acc_row(
+        rows,
+        name,
+        lambda item: item.get("cap_active") == 1,
+    )
+    if row is None:
+        return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
+
+    errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
+    seed_total = seed_created_total(case.log)
+    if seed_total is not None and seed_total != 1:
+        errors.append(f"seed_created_total={seed_total} expected 1")
+    if not errors:
+        if int(row["cap_active"]) != 1:
+            errors.append(f"cap_active={row['cap_active']} expected 1")
+        if float(row["lambda_edd"]) <= 1.0:
+            errors.append(f"lambda_edd={row['lambda_edd']} expected > 1")
+        assert_close(errors, "edd_factor", float(row["edd_factor"]), 1.0, 0.0, 0.0)
+        if not (float(row["Mdot_total_raw"]) > float(row["Mdot_Edd"]) > 0.0):
+            errors.append(
+                f"expected Mdot_total_raw > Mdot_Edd > 0, got "
+                f"{row['Mdot_total_raw']} and {row['Mdot_Edd']}"
+            )
+        assert_close(
+            errors, "Mdot_actual", float(row["Mdot_actual"]),
+            float(row["Mdot_Edd"]), D0C_ACC_STRICT_RTOL,
+        )
+        if not (0.0 < float(row["frac_cap"]) < 1.0):
+            errors.append(f"frac_cap={row['frac_cap']} expected 0 < frac_cap < 1")
+        assert_close(errors, "frac_gas", float(row["frac_gas"]), 1.0, 1e-12, 1e-12)
+        if int(row["removal_gas_limited"]) != 0:
+            errors.append(
+                f"removal_gas_limited={row['removal_gas_limited']} expected 0"
+            )
+        assert_close(
+            errors, "dm_removed", float(row["dm_removed"]),
+            float(row["dm_requested"]), D0C_ACC_STRICT_RTOL,
+        )
+        if float(row["dm_removed"]) <= 0.0:
+            errors.append(f"dm_removed={row['dm_removed']} expected > 0")
+
+    metrics = {
+        "seed_created_total": seed_total,
+        "row": compact_row(row, D0C_ACC_REQUIRED_FIELDS),
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"cap_active=1 lambda_edd={float(row['lambda_edd']):.8e} "
+        f"frac_cap={float(row['frac_cap']):.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_a5(case):
+    name = "D0c-acc A5 gas-limited mismatch"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    rows = bhaccr_rows(case.log)
+    row, row_error = select_d0c_acc_row(
+        rows,
+        name,
+        lambda item: item.get("removal_gas_limited") == 1,
+    )
+    if row is None:
+        return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
+
+    errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
+    seed_total = seed_created_total(case.log)
+    if seed_total is not None and seed_total != 1:
+        errors.append(f"seed_created_total={seed_total} expected 1")
+    if not errors:
+        if float(row["Mdot_actual"]) <= 0.0:
+            errors.append(f"Mdot_actual={row['Mdot_actual']} expected > 0")
+        if float(row["dm_requested"]) <= 0.0:
+            errors.append(f"dm_requested={row['dm_requested']} expected > 0")
+        if float(row["dm_removed"]) <= 0.0:
+            errors.append(f"dm_removed={row['dm_removed']} expected > 0")
+        if not (float(row["dm_removed"]) < float(row["dm_requested"])):
+            errors.append(
+                f"dm_removed={row['dm_removed']} expected < "
+                f"dm_requested={row['dm_requested']}"
+            )
+        if int(row["removal_gas_limited"]) != 1:
+            errors.append(
+                f"removal_gas_limited={row['removal_gas_limited']} expected 1"
+            )
+        if not (0.0 < float(row["frac_gas"]) < 1.0):
+            errors.append(f"frac_gas={row['frac_gas']} expected 0 < frac_gas < 1")
+        if int(row["cap_active"]) != 0:
+            errors.append(f"cap_active={row['cap_active']} expected 0")
+        assert_close(errors, "frac_cap", float(row["frac_cap"]), 1.0, 1e-12, 1e-12)
+
+    metrics = {
+        "seed_created_total": seed_total,
+        "row": compact_row(row, D0C_ACC_REQUIRED_FIELDS),
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"frac_gas={float(row['frac_gas']):.8e} "
+        f"dm_removed/dm_requested={float(row['dm_removed']) / float(row['dm_requested']):.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_f6(case):
+    name = "D0c-acc F6 mismatch metric"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    rows = [
+        row for row in bhaccr_rows(case.log)
+        if is_finite_number(row.get("dm_requested")) and
+        is_finite_number(row.get("dm_removed")) and
+        float(row["dm_requested"]) > 0.0
+    ]
+    if not rows:
+        return fail_result(
+            name,
+            "no A5 [BHACCR] rows with dm_requested > 0",
+            {"bhaccr_rows": len(bhaccr_rows(case.log))},
+            str(case.log),
+        )
+    denominator = sum(float(row["dm_requested"]) for row in rows)
+    numerator = sum(float(row["dm_requested"]) - float(row["dm_removed"]) for row in rows)
+    metric = numerator / denominator if denominator > 0.0 else math.nan
+    row_failures = [
+        compact_row(row, ("step", "bh_id", "dm_requested", "dm_removed", "frac_gas"))
+        for row in rows
+        if not (float(row["dm_removed"]) < float(row["dm_requested"]))
+    ]
+    errors = []
+    if denominator <= 0.0:
+        errors.append(f"denominator={denominator} expected > 0")
+    if not (0.0 < metric < 1.0):
+        errors.append(f"mismatch metric M={metric} expected 0 < M < 1")
+    if metric <= D0C_F6_MIN_MISMATCH:
+        errors.append(f"mismatch metric M={metric} expected > {D0C_F6_MIN_MISMATCH}")
+    if row_failures:
+        errors.append(f"rows without dm_removed < dm_requested: {row_failures[:3]}")
+    metrics = {
+        "formula": "sum(dm_requested - dm_removed) / sum(dm_requested)",
+        "numerator": numerator,
+        "denominator": denominator,
+        "mismatch_metric": metric,
+        "rows_used": len(rows),
+        "representative_row": compact_row(
+            rows[0],
+            ("step", "bh_id", "dm_requested", "dm_removed", "frac_gas",
+             "removal_gas_limited", "cap_active"),
+        ),
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"M={metric:.10f} numerator={numerator:.8e} denominator={denominator:.8e}",
         metrics,
         str(case.log),
     )
@@ -2185,6 +2564,10 @@ def main(argv=None):
             "D0b-lite F3 conservation audit through burst",
             "D0b-lite T7 restart preservation",
             "D0b-lite T10 MPI diagnostic comparison",
+            "D0c-acc A1 Bondi formula/unit",
+            "D0c-acc A2 Eddington cap activation",
+            "D0c-acc A5 gas-limited mismatch",
+            "D0c-acc F6 mismatch metric",
             "T8 negative BHFeedbackEddingtonFactor validation",
             "T9 efficiency product > 1.0 validation",
         ):
@@ -2267,6 +2650,32 @@ def main(argv=None):
 
         t10_np1, t10_npn, t10_config = run_t10_cases()
         results.append(validate_d0b_t10(t10_np1, t10_npn, t10_config))
+
+        a1 = run_named("D0c_A1_bondi_unit", d0c_acc_base_overrides())
+        results.append(validate_d0c_a1(a1))
+
+        a2 = run_named(
+            "D0c_A2_eddington_cap",
+            d0c_acc_base_overrides(
+                BHSeedMass="1e8",
+                BHSeedMinEnclosedMass="1e8",
+                BHFeedbackEddingtonFactor="1.0",
+            ),
+        )
+        results.append(validate_d0c_a2(a2))
+
+        a5 = run_named(
+            "D0c_A5_gas_limited_mismatch",
+            d0c_acc_base_overrides(
+                BHSeedMass="1e10",
+                BHSeedMinEnclosedMass="1e10",
+                BHFeedbackEddingtonFactor="50000",
+                BHAccretionRemovalMode=1,
+                TestStarParticleDensity=51,
+            ),
+        )
+        results.append(validate_d0c_a5(a5))
+        results.append(validate_d0c_f6(a5))
 
     results.append(run_optional_phaseb_lite(include_phaseb))
     results.append(validate_h1(start_snapshot))
