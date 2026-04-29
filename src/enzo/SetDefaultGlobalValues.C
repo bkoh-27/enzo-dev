@@ -744,7 +744,7 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   MBHInsertLocationFilename        = (char*) "mbh_insert_location.in";
   OutputWhenJetsHaveNotEjected     = FALSE;
 
-  BHSeedingMethod                  = 1;
+  BHSeedingMethod                  = 0;
   BHSeedOverdensityThreshold       = 1000.0;
   BHSeedMetallicityThreshold       = 1.0e-4;
   BHSeedMetallicityThresholdInSolar = FLOAT_UNDEFINED;
@@ -775,7 +775,7 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHRepositionDiagnosePotential    = 0;      // optional potential-min offset
   BHRepositionVerbose              = 1;
 
-  BHAccretionMethod                = 1;      // Phase A diagnostics on
+  BHAccretionMethod                = 0;      // opt-in new BH accretion path
   BHAccretionKernelRadius          = 3.0;    // physical kpc
   BHAccretionRemovalRadius         = 1;      // Phase B active (cell widths)
   BHAccretionTSplitFloor           = 5.0e5;  // K

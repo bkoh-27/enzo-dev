@@ -155,8 +155,10 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
   const int ny = GridDimension[1];
   const int nz = GridDimension[2];
 
-  const int rcell = max(0, int(ceil(search_radius_code / cell_width)));
-  const double r2 = search_radius_code * search_radius_code;
+	  const int rcell = max(0, int(ceil(search_radius_code / cell_width)));
+	  const double r2 = search_radius_code * search_radius_code;
+	  const int search_exceeds_ghost =
+	    (search_radius_over_dx > double(NumberOfGhostZones)) ? 1 : 0;
 
   const int isx = this->GetGridStartIndex(0);
   const int isy = this->GetGridStartIndex(1);
@@ -202,12 +204,19 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "kernel under-resolved (<1.5 cells).\n",
               cycle_number, level, search_radius_over_dx);
     }
-    if (search_radius_over_dx > 3.0) {
-      fprintf(logptr,
-              "[BHREPOS_WARN] step=%d level=%d search_radius_over_dx=%.6g "
-              "kernel may exceed ghost-zone support (>3 cells).\n",
-              cycle_number, level, search_radius_over_dx);
-    }
+	    if (search_radius_over_dx > 3.0) {
+	      fprintf(logptr,
+	              "[BHREPOS_WARN] step=%d level=%d search_radius_over_dx=%.6g "
+	              "kernel may exceed ghost-zone support (>3 cells).\n",
+	              cycle_number, level, search_radius_over_dx);
+	    }
+	    if (BHRepositionMethod == 0) {
+	      fprintf(logptr,
+	              "[BHREPOS_WARN] step=%d level=%d BHRepositionMethod=0 "
+	              "runs diagnostics only because BHRepositionVerbose=%d; "
+	              "no particle movement will be applied.\n",
+	              cycle_number, level, BHRepositionVerbose);
+	    }
     if (BHRepositionMaxDisplacement > search_radius_over_dx) {
       fprintf(logptr,
               "[BHREPOS_WARN] step=%d level=%d max_displacement_cells=%.6g "
@@ -264,10 +273,12 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "diag_peak_density=%.8e diag_peak_in_ghost=%d diag_peak_offset_kpc=%.8g "
               "active_peak_pos_x=%.15g active_peak_pos_y=%.15g active_peak_pos_z=%.15g "
               "active_peak_density=%.8e active_peak_offset_kpc=%.8g active_target_exists=%d "
-              "offset_from_potential_kpc=%.8g "
-              "displacement_kpc=%.8g displacement_cells=%.8g "
-              "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
-              "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f\n",
+	            "offset_from_potential_kpc=%.8g "
+	            "displacement_kpc=%.8g displacement_cells=%.8g "
+	            "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
+	            "method=%d diagnostic_only=%d search_kernel_truncated=%d "
+	            "active_reposition_rejected=%d "
+	            "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f\n",
               cycle_number, level, zred, (long long) ParticleNumber[p],
               bh_pos[0], bh_pos[1], bh_pos[2],
               0.0,
@@ -314,9 +325,17 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     const int ilo = max(0, i0 - rcell);
     const int ihi = min(nx - 1, i0 + rcell);
     const int jlo = max(0, j0 - rcell);
-    const int jhi = min(ny - 1, j0 + rcell);
-    const int klo = max(0, k0 - rcell);
-    const int khi = min(nz - 1, k0 + rcell);
+	    const int jhi = min(ny - 1, j0 + rcell);
+	    const int klo = max(0, k0 - rcell);
+	    const int khi = min(nz - 1, k0 + rcell);
+	    const int search_truncated_by_grid =
+	      (i0 - rcell < 0 || i0 + rcell >= nx ||
+	       j0 - rcell < 0 || j0 + rcell >= ny ||
+	       k0 - rcell < 0 || k0 + rcell >= nz) ? 1 : 0;
+	    const int search_kernel_truncated =
+	      (search_exceeds_ghost || search_truncated_by_grid) ? 1 : 0;
+	    const int active_reposition_rejected =
+	      (BHRepositionMethod > 0 && search_kernel_truncated) ? 1 : 0;
 
     /* Deterministic k-j-i traversal, matching BH seed/accretion kernels. */
     for (int k = klo; k <= khi; k++) {
@@ -433,12 +452,24 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       warned_potential_unavailable = TRUE;
     }
 
-    double displacement_code = 0.0;
-    int reposition_occurred = 0;
-    int reposition_clamped = 0;
+	    double displacement_code = 0.0;
+	    int reposition_occurred = 0;
+	    int reposition_clamped = 0;
 
-    FLOAT bh_pos_new[MAX_DIMENSION] = {bh_pos[0], bh_pos[1], bh_pos[2]};
-    if (BHRepositionMethod > 0 && active_target_exists) {
+	    FLOAT bh_pos_new[MAX_DIMENSION] = {bh_pos[0], bh_pos[1], bh_pos[2]};
+	    if (active_reposition_rejected && BHRepositionVerbose >= 1) {
+	      fprintf(logptr,
+	              "[BHREPOS_WARN] step=%d level=%d bh_id=%lld "
+	              "active_reposition_rejected=1 search_radius_over_dx=%.6g "
+	              "NumberOfGhostZones=%d search_truncated_by_grid=%d; "
+	              "diagnostics retained but particle movement skipped.\n",
+	              cycle_number, level, (long long) ParticleNumber[p],
+	              search_radius_over_dx, NumberOfGhostZones,
+	              search_truncated_by_grid);
+	    }
+
+	    if (BHRepositionMethod > 0 && active_target_exists &&
+	        !active_reposition_rejected) {
       if (BHRepositionMethod == 1) {
         const double max_displacement_code =
           double(BHRepositionMaxDisplacement) * double(cell_width);
@@ -528,10 +559,12 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
             diag_peak_density, diag_peak_in_ghost, diag_offset_kpc,
             active_peak_pos[0], active_peak_pos[1], active_peak_pos[2],
             active_peak_density, active_offset_kpc, active_target_exists,
-            offset_from_potential_kpc,
-            displacement_kpc, displacement_cells,
-            reposition_occurred, reposition_clamped, 0,
-            search_cells, search_active_cells, reposition_wall_ms);
+	            offset_from_potential_kpc,
+	            displacement_kpc, displacement_cells,
+	            reposition_occurred, reposition_clamped, 0,
+	            BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
+	            search_kernel_truncated, active_reposition_rejected,
+	            search_cells, search_active_cells, reposition_wall_ms);
   }
 
   return SUCCESS;

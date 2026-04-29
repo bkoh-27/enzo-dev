@@ -44,11 +44,15 @@ For each BH particle on a grid:
 - `dm_requested = Mdot_total_capped * dt`.
 5. Build a removal kernel (`BHAccretionRemovalRadius`, cell widths) and remove gas proportionally from active-zone cells only.
 - optional debug mode: host cell only (`BHAccretionRemovalMode = 1`).
-6. Grow BH mass by exactly the removed mass (`dm_removed`) and update metadata.
+6. Cap each cell's removal so density, internal energy, and pressure remain valid.
+7. Grow BH mass by exactly the removed mass (`dm_removed`) and update metadata.
 
 Important behavior:
 - Newly seeded BHs are skipped for accretion in the same pass.
 - They seed first, then accrete starting from the next pass.
+- If the diagnostic kernel exceeds ghost-zone/grid support, active gas removal
+  is rejected and logged (`accretion_source_rejected=1`); diagnostics are still
+  emitted.
 
 ## Phase A vs Phase B (What Is Active)
 Phase A behavior (still present):
@@ -60,6 +64,7 @@ Phase B additions (active):
 - real gas removal,
 - BH mass growth,
 - realized channel rates after gas limitation,
+- per-cell density/energy/pressure floors and source-update diagnostics,
 - SF blocking for removal cells,
 - momentum-omission diagnostics and warnings,
 - invariant checks and bookkeeping enforcement.
@@ -69,7 +74,7 @@ Defaults are from `src/enzo/SetDefaultGlobalValues.C`.
 
 | Parameter | Default | Meaning | Units |
 | --- | --- | --- | --- |
-| `BHAccretionMethod` | `1` | Module switch (`0` off, `1` on). | enum |
+| `BHAccretionMethod` | `0` | Module switch (`0` off, `1` on). The new `[BHACCR]` source path is opt-in. | enum |
 | `BHAccretionKernelRadius` | `3.0` | Diagnostic kernel radius. | physical kpc |
 | `BHAccretionRemovalRadius` | `1` | Removal kernel radius. | cell widths |
 | `BHAccretionRemovalMode` | `0` | `0` multi-cell, `1` host-cell debug. | enum |

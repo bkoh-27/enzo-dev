@@ -25,6 +25,7 @@
 #include "Grid.h"
 #include "CosmologyParameters.h"
 #include "phys_constants.h"
+#include "BHAccretionSafety.h"
 
 int CosmologyComputeExpansionFactor(FLOAT time, FLOAT *a, FLOAT *dadt);
 int GetUnits(float *DensityUnits, float *LengthUnits,
@@ -296,22 +297,51 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     j0 = max(0, min(ny - 1, j0));
     k0 = max(0, min(nz - 1, k0));
 
-    const int ilo = max(0, i0 - rcell);
-    const int ihi = min(nx - 1, i0 + rcell);
-    const int jlo = max(0, j0 - rcell);
-    const int jhi = min(ny - 1, j0 + rcell);
-    const int klo = max(0, k0 - rcell);
-    const int khi = min(nz - 1, k0 + rcell);
+	    const int ilo = max(0, i0 - rcell);
+	    const int ihi = min(nx - 1, i0 + rcell);
+	    const int jlo = max(0, j0 - rcell);
+	    const int jhi = min(ny - 1, j0 + rcell);
+	    const int klo = max(0, k0 - rcell);
+	    const int khi = min(nz - 1, k0 + rcell);
 
-    BHAccretionChannelAccumulator hot = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                         0.0, 0.0, 0.0, 0};
-    BHAccretionChannelAccumulator cold = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                          0.0, 0.0, 0.0, 0};
+	    const double kernel_cells_per_radius = kernel_radius_code / cell_width;
+	    const int kernel_exceeds_ghost =
+	      (kernel_cells_per_radius > double(NumberOfGhostZones)) ? 1 : 0;
+	    const int kernel_truncated_by_grid =
+	      (i0 - rcell < 0 || i0 + rcell >= nx ||
+	       j0 - rcell < 0 || j0 + rcell >= ny ||
+	       k0 - rcell < 0 || k0 + rcell >= nz) ? 1 : 0;
+	    const int kernel_truncated =
+	      (kernel_exceeds_ghost || kernel_truncated_by_grid) ? 1 : 0;
 
-    int n_kernel_cells = 0;
-    int n_hot_cells = 0;
-    int n_cold_cells = 0;
-    int n_fallback_cells = 0;
+	    long long n_kernel_cells_requested = 0;
+	    if (rcell <= 4096) {
+	      for (int kk = -rcell; kk <= rcell; kk++) {
+	        const double dz = double(kk) * double(cell_width);
+	        for (int jj = -rcell; jj <= rcell; jj++) {
+	          const double dy = double(jj) * double(cell_width);
+	          const double rem = r2 - dy*dy - dz*dz;
+	          if (rem < 0.0)
+	            continue;
+	          const long long imax = (long long) floor(sqrt(rem) / cell_width);
+	          n_kernel_cells_requested += 2*imax + 1;
+	        }
+	      }
+	    } else {
+	      n_kernel_cells_requested =
+	        (long long) ((4.0*pi/3.0) * pow(double(rcell), 3.0));
+	    }
+
+	    BHAccretionChannelAccumulator hot = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+	                                         0.0, 0.0, 0.0, 0};
+	    BHAccretionChannelAccumulator cold = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+	                                          0.0, 0.0, 0.0, 0};
+
+	    int n_kernel_cells = 0;
+	    int n_kernel_active_cells = 0;
+	    int n_hot_cells = 0;
+	    int n_cold_cells = 0;
+	    int n_fallback_cells = 0;
 
     /* Deterministic k-j-i traversal, matching BH seeding kernels. */
     for (int k = klo; k <= khi; k++) {
@@ -330,12 +360,15 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
             continue;
 
           const double mcell = rho * cell_volume_code;
-          if (mcell <= 0.0)
-            continue;
+	          if (mcell <= 0.0)
+	            continue;
 
-          n_kernel_cells++;
+	          n_kernel_cells++;
+	          if (i >= isx && i <= iex && j >= isy && j <= iey &&
+	              k >= isz && k <= iez)
+	            n_kernel_active_cells++;
 
-          double vx = BaryonField[Vel1Num][nindex];
+	          double vx = BaryonField[Vel1Num][nindex];
           double vy = BaryonField[Vel2Num][nindex];
           double vz = BaryonField[Vel3Num][nindex];
           if (HydroMethod == Zeus_Hydro) {
@@ -530,49 +563,65 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       max(0, int(ceil(removal_radius_code / cell_width)));
     const double remove_r2 = removal_radius_code * removal_radius_code;
 
-    std::vector<int> remove_index;
-    std::vector<double> remove_mass;
-    std::vector<double> remove_velx;
-    std::vector<double> remove_vely;
-    std::vector<double> remove_velz;
+	    std::vector<int> remove_index;
+	    std::vector<double> remove_mass;
+	    std::vector<double> remove_safe_mass;
+	    std::vector<double> remove_velx;
+	    std::vector<double> remove_vely;
+	    std::vector<double> remove_velz;
 
     const int reserve_n = max(1, (2*rcell_remove+1)*(2*rcell_remove+1)*(2*rcell_remove+1));
-    remove_index.reserve(reserve_n);
-    remove_mass.reserve(reserve_n);
-    remove_velx.reserve(reserve_n);
-    remove_vely.reserve(reserve_n);
-    remove_velz.reserve(reserve_n);
+	    remove_index.reserve(reserve_n);
+	    remove_mass.reserve(reserve_n);
+	    remove_safe_mass.reserve(reserve_n);
+	    remove_velx.reserve(reserve_n);
+	    remove_vely.reserve(reserve_n);
+	    remove_velz.reserve(reserve_n);
 
-    double removal_kernel_gas = 0.0;
+	    double removal_kernel_gas = 0.0;
+	    double removal_kernel_safe_gas = 0.0;
+	    const double density_floor_code =
+	      BHAccretionDensityFloorCode(tiny_number, SmallRho);
+	    const double density_floor_mass = density_floor_code * cell_volume_code;
+	    const int accretion_source_rejected = kernel_truncated;
+	    int n_floor_rejected_cells = 0;
 
-    if (removal_mode == 1) {
-      if (i0 >= isx && i0 <= iex && j0 >= isy && j0 <= iey && k0 >= isz && k0 <= iez) {
-        const int nindex = (k0*ny + j0)*nx + i0;
-        const double rho = BaryonField[DensNum][nindex];
-        if (rho > 0.0) {
-          const double mcell = rho * cell_volume_code;
-          if (mcell > 0.0) {
-            double vx = BaryonField[Vel1Num][nindex];
-            double vy = BaryonField[Vel2Num][nindex];
-            double vz = BaryonField[Vel3Num][nindex];
-            if (HydroMethod == Zeus_Hydro) {
-              if (i0 + 1 < nx)
-                vx = 0.5*(BaryonField[Vel1Num][nindex] + BaryonField[Vel1Num][nindex+xo]);
-              if (j0 + 1 < ny)
-                vy = 0.5*(BaryonField[Vel2Num][nindex] + BaryonField[Vel2Num][nindex+yo]);
-              if (k0 + 1 < nz)
-                vz = 0.5*(BaryonField[Vel3Num][nindex] + BaryonField[Vel3Num][nindex+zo]);
-            }
-            remove_index.push_back(nindex);
-            remove_mass.push_back(mcell);
-            remove_velx.push_back(vx);
-            remove_vely.push_back(vy);
-            remove_velz.push_back(vz);
-            removal_kernel_gas += mcell;
-          }
-        }
-      }
-    } else {
+	    if (!accretion_source_rejected && removal_mode == 1) {
+	      if (i0 >= isx && i0 <= iex && j0 >= isy && j0 <= iey && k0 >= isz && k0 <= iez) {
+	        const int nindex = (k0*ny + j0)*nx + i0;
+	        const double rho = BaryonField[DensNum][nindex];
+	        if (rho > 0.0) {
+	          const double mcell = rho * cell_volume_code;
+	          if (mcell > 0.0) {
+	            const double safe_mass =
+	              BHAccretionSafeRemovableMass(mcell, density_floor_mass);
+	            removal_kernel_gas += mcell;
+	            removal_kernel_safe_gas += safe_mass;
+	            if (safe_mass <= 0.0) {
+	              n_floor_rejected_cells++;
+	            } else {
+	              double vx = BaryonField[Vel1Num][nindex];
+	              double vy = BaryonField[Vel2Num][nindex];
+	              double vz = BaryonField[Vel3Num][nindex];
+	              if (HydroMethod == Zeus_Hydro) {
+	                if (i0 + 1 < nx)
+	                  vx = 0.5*(BaryonField[Vel1Num][nindex] + BaryonField[Vel1Num][nindex+xo]);
+	                if (j0 + 1 < ny)
+	                  vy = 0.5*(BaryonField[Vel2Num][nindex] + BaryonField[Vel2Num][nindex+yo]);
+	                if (k0 + 1 < nz)
+	                  vz = 0.5*(BaryonField[Vel3Num][nindex] + BaryonField[Vel3Num][nindex+zo]);
+	              }
+	              remove_index.push_back(nindex);
+	              remove_mass.push_back(mcell);
+	              remove_safe_mass.push_back(safe_mass);
+	              remove_velx.push_back(vx);
+	              remove_vely.push_back(vy);
+	              remove_velz.push_back(vz);
+	            }
+	          }
+	        }
+	      }
+	    } else if (!accretion_source_rejected) {
       const int ilo_r = max(0, i0 - rcell_remove);
       const int ihi_r = min(nx - 1, i0 + rcell_remove);
       const int jlo_r = max(0, j0 - rcell_remove);
@@ -598,11 +647,19 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
             if (rho <= 0.0)
               continue;
 
-            const double mcell = rho * cell_volume_code;
-            if (mcell <= 0.0)
-              continue;
+	            const double mcell = rho * cell_volume_code;
+	            if (mcell <= 0.0)
+	              continue;
+	            const double safe_mass =
+	              BHAccretionSafeRemovableMass(mcell, density_floor_mass);
+	            removal_kernel_gas += mcell;
+	            removal_kernel_safe_gas += safe_mass;
+	            if (safe_mass <= 0.0) {
+	              n_floor_rejected_cells++;
+	              continue;
+	            }
 
-            double vx = BaryonField[Vel1Num][nindex];
+	            double vx = BaryonField[Vel1Num][nindex];
             double vy = BaryonField[Vel2Num][nindex];
             double vz = BaryonField[Vel3Num][nindex];
             if (HydroMethod == Zeus_Hydro) {
@@ -614,29 +671,32 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
                 vz = 0.5*(BaryonField[Vel3Num][nindex] + BaryonField[Vel3Num][nindex+zo]);
             }
 
-            remove_index.push_back(nindex);
-            remove_mass.push_back(mcell);
-            remove_velx.push_back(vx);
-            remove_vely.push_back(vy);
-            remove_velz.push_back(vz);
-            removal_kernel_gas += mcell;
-          }
-        }
-      }
+	            remove_index.push_back(nindex);
+	            remove_mass.push_back(mcell);
+	            remove_safe_mass.push_back(safe_mass);
+	            remove_velx.push_back(vx);
+	            remove_vely.push_back(vy);
+	            remove_velz.push_back(vz);
+	          }
+	        }
+	      }
     }
 
-    double dm_removed_total = 0.0;
-    int removal_gas_limited = 0;
-    double frac_gas = 1.0;
-    const double availability_tol =
-      1.0e-12 * max(1.0, max(removal_kernel_gas, dm_requested));
-    if (dm_requested > 0.0) {
-      if (removal_kernel_gas + availability_tol >= dm_requested) {
-        dm_removed_total = dm_requested;
-      } else {
-        dm_removed_total = max(0.0, removal_kernel_gas);
-        removal_gas_limited = 1;
-      }
+	    double dm_removed_total = 0.0;
+	    int removal_gas_limited = 0;
+	    double frac_gas = 1.0;
+	    const double availability_tol =
+	      1.0e-12 * max(1.0, max(removal_kernel_safe_gas, dm_requested));
+	    if (dm_requested > 0.0) {
+	      if (accretion_source_rejected) {
+	        dm_removed_total = 0.0;
+	        removal_gas_limited = 1;
+	      } else if (removal_kernel_safe_gas + availability_tol >= dm_requested) {
+	        dm_removed_total = dm_requested;
+	      } else {
+	        dm_removed_total = max(0.0, removal_kernel_safe_gas);
+	        removal_gas_limited = 1;
+	      }
 
       frac_gas = dm_removed_total / dm_requested;
       frac_gas = min(1.0, max(0.0, frac_gas));
@@ -651,32 +711,42 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     int removal_cells = 0;
     int n_sf_blocked_cells = 0;
 
-    if (dm_removed_total > 0.0 && !remove_index.empty() && removal_kernel_gas > 0.0) {
-      double remaining_to_remove = dm_removed_total;
-      double remaining_available = removal_kernel_gas;
+	    double min_density_before = DBL_MAX;
+	    double min_density_after = DBL_MAX;
+	    double min_eint_before = DBL_MAX;
+	    double min_eint_after = DBL_MAX;
+	    double min_pressure_before = DBL_MAX;
+	    double min_pressure_after = DBL_MAX;
+	    double max_cell_removal_fraction = 0.0;
+	    int n_cells_clamped = 0;
+	    int n_energy_consistency_fail = 0;
 
-      for (int n = 0; n < int(remove_index.size()); n++) {
-        const double mcell = remove_mass[n];
+	    if (dm_removed_total > 0.0 && !remove_index.empty() && removal_kernel_safe_gas > 0.0) {
+	      double remaining_to_remove = dm_removed_total;
+	      double remaining_available = removal_kernel_safe_gas;
 
-        double dm = 0.0;
-        if (n == int(remove_index.size()) - 1)
+	      for (int n = 0; n < int(remove_index.size()); n++) {
+	        const double mcell = remove_safe_mass[n];
+
+	        double dm = 0.0;
+	        if (n == int(remove_index.size()) - 1)
           dm = remaining_to_remove;
         else if (remaining_available > 0.0)
           dm = remaining_to_remove * (mcell / remaining_available);
 
-        dm = max(0.0, dm);
-        dm = min(dm, mcell);
+	        dm = max(0.0, dm);
+	        dm = min(dm, mcell);
 
         dm_removed_cell[n] = dm;
         remaining_to_remove -= dm;
-        remaining_available -= mcell;
-      }
+	        remaining_available -= mcell;
+	      }
 
       if (remaining_to_remove != 0.0) {
         if (remaining_to_remove > 0.0) {
           for (int n = int(remove_index.size()) - 1;
                n >= 0 && remaining_to_remove > 0.0; n--) {
-            const double cap = remove_mass[n] - dm_removed_cell[n];
+	            const double cap = remove_safe_mass[n] - dm_removed_cell[n];
             if (cap <= 0.0)
               continue;
             const double add = min(cap, remaining_to_remove);
@@ -695,54 +765,144 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
         }
       }
 
-      for (int n = 0; n < int(remove_index.size()); n++) {
-        const int nindex = remove_index[n];
-        const double dm = dm_removed_cell[n];
-        if (dm <= 0.0)
-          continue;
+	      for (int n = 0; n < int(remove_index.size()); n++) {
+	        const int nindex = remove_index[n];
+	        double dm = dm_removed_cell[n];
+	        if (dm <= 0.0)
+	          continue;
 
-        const double rho_old = BaryonField[DensNum][nindex];
-        const double mold = rho_old * cell_volume_code;
-        const double mnew = max(0.0, mold - dm);
-        double rho_new = mnew / cell_volume_code;
-        if (rho_new < 0.0)
-          rho_new = 0.0;
+	        const double rho_old = BaryonField[DensNum][nindex];
+	        const double mold = rho_old * cell_volume_code;
+	        if (mold <= 0.0) {
+	          n_floor_rejected_cells++;
+	          continue;
+	        }
 
-        removal_cells++;
+	        double mnew = mold - dm;
+	        const double mnew_floor =
+	          max(density_floor_mass,
+	              (1.0 - BHAccretionMaxCellRemovalFraction) * mold);
+	        if (mnew < mnew_floor) {
+	          mnew = mnew_floor;
+	          dm = max(0.0, mold - mnew);
+	          n_cells_clamped++;
+	        }
+	        if (dm <= 0.0 || mnew <= 0.0) {
+	          n_floor_rejected_cells++;
+	          continue;
+	        }
 
-        if (HydroMethod == PPM_DirectEuler) {
-          if (mold > 0.0 && mnew > 0.0) {
-            const double vx = remove_velx[n];
-            const double vy = remove_vely[n];
-            const double vz = remove_velz[n];
-            const double v2 = vx*vx + vy*vy + vz*vz;
+	        const double rho_new = mnew / cell_volume_code;
+	        const double vx = remove_velx[n];
+	        const double vy = remove_vely[n];
+	        const double vz = remove_velz[n];
+	        const double v2 = vx*vx + vy*vy + vz*vz;
+	        const int use_dual_energy =
+	          (GENum >= 0 && DualEnergyFormalism) ? TRUE : FALSE;
+	        const double ge_old =
+	          (GENum >= 0) ? BaryonField[GENum][nindex] : -1.0;
+	        const double te_old = BaryonField[TENum][nindex];
+	        const double eint_old =
+	          BHAccretionInternalEnergySpecific(te_old, ge_old, vx, vy, vz,
+	                                            use_dual_energy != FALSE);
+	        const double pressure_old =
+	          BHAccretionPressureFromState(rho_old, te_old, ge_old, vx, vy, vz,
+	                                       use_dual_energy != FALSE, Gamma);
 
-            const double etot = mold * BaryonField[TENum][nindex];
-            double eint = 0.0;
-            if (GENum >= 0 && DualEnergyFormalism)
-              eint = mold * BaryonField[GENum][nindex];
-            else
-              eint = etot - 0.5*mold*v2;
+	        if (isfinite(rho_old))
+	          min_density_before = min(min_density_before, rho_old);
+	        if (isfinite(eint_old))
+	          min_eint_before = min(min_eint_before, eint_old);
+	        if (isfinite(pressure_old))
+	          min_pressure_before = min(min_pressure_before, pressure_old);
 
-            const double ke = 0.5*mold*v2;
-            const double frac = mnew / mold;
-            const double eint_new = eint * frac;
-            const double ke_new = ke * frac;
-            const double etot_new = eint_new + ke_new;
-            BaryonField[TENum][nindex] = float(etot_new / mnew);
-            if (GENum >= 0 && DualEnergyFormalism)
-              BaryonField[GENum][nindex] = float(eint_new / mnew);
-          }
-        } else if (HydroMethod == Zeus_Hydro) {
-          /* Total energy is internal specific energy for Zeus; unchanged. */
-          ;
-        } else {
-          ENZO_FAIL("BHAccretion removal does not support RK Hydro or RK MHD.");
-        }
+	        removal_cells++;
 
-        BaryonField[DensNum][nindex] = float(rho_new);
+	        if (HydroMethod == PPM_DirectEuler) {
+	          const double ge_floor =
+	            BHAccretionGasEnergyFloor(rho_new, tiny_number, Gamma);
+	          double eint_new = eint_old;
+	          if (!isfinite(eint_new) || eint_new < ge_floor) {
+	            eint_new = ge_floor;
+	            n_cells_clamped++;
+	          }
+	          BaryonField[TENum][nindex] = float(eint_new + 0.5*v2);
+	          if (GENum >= 0 && DualEnergyFormalism)
+	            BaryonField[GENum][nindex] = float(eint_new);
+	        } else if (HydroMethod == Zeus_Hydro) {
+	          const double ge_floor =
+	            BHAccretionGasEnergyFloor(rho_new, tiny_number, Gamma);
+	          double eint_new = BaryonField[TENum][nindex];
+	          if (!isfinite(eint_new) || eint_new < ge_floor) {
+	            eint_new = ge_floor;
+	            n_cells_clamped++;
+	          }
+	          BaryonField[TENum][nindex] = float(eint_new);
+	        } else {
+	          ENZO_FAIL("BHAccretion removal does not support RK Hydro or RK MHD.");
+	        }
 
-        removed_mass += dm;
+	        BaryonField[DensNum][nindex] = float(rho_new);
+
+	        const double ge_after =
+	          (GENum >= 0) ? BaryonField[GENum][nindex] : -1.0;
+	        const double te_after = BaryonField[TENum][nindex];
+	        const double eint_after =
+	          BHAccretionInternalEnergySpecific(te_after, ge_after, vx, vy, vz,
+	                                            use_dual_energy != FALSE);
+	        const double pressure_after =
+	          BHAccretionPressureFromState(rho_new, te_after, ge_after, vx, vy, vz,
+	                                       use_dual_energy != FALSE, Gamma);
+
+	        if (isfinite(rho_new))
+	          min_density_after = min(min_density_after, rho_new);
+	        if (isfinite(eint_after))
+	          min_eint_after = min(min_eint_after, eint_after);
+	        if (isfinite(pressure_after))
+	          min_pressure_after = min(min_pressure_after, pressure_after);
+
+	        const double consistency =
+	          te_after - (eint_after + 0.5*v2);
+	        const double consistency_tol =
+	          1.0e-6 * max(1.0, fabs(te_after));
+	        int cell_energy_update_consistent = TRUE;
+	        if (HydroMethod == PPM_DirectEuler &&
+	            (!isfinite(consistency) || fabs(consistency) > consistency_tol)) {
+	          n_energy_consistency_fail++;
+	          cell_energy_update_consistent = FALSE;
+	        }
+
+	        const double removal_fraction = dm / mold;
+	        if (isfinite(removal_fraction))
+	          max_cell_removal_fraction =
+	            max(max_cell_removal_fraction, removal_fraction);
+
+	        if (BHAccretionVerbose >= 2) {
+	          fprintf(logptr,
+	                  "[BHACCR_CELL] rank=%d step=%d level=%d grid_id=%d bh_id=%lld "
+	                  "i=%d j=%d k=%d index=%d dm=%.15e removal_fraction=%.8g "
+	                  "rho_before=%.15e rho_after=%.15e "
+	                  "total_energy_before=%.15e total_energy_after=%.15e "
+	                  "gas_energy_before=%.15e gas_energy_after=%.15e "
+	                  "vx_before=%.15e vy_before=%.15e vz_before=%.15e "
+	                  "vx_after=%.15e vy_after=%.15e vz_after=%.15e "
+	                  "px_before=%.15e py_before=%.15e pz_before=%.15e "
+	                  "px_after=%.15e py_after=%.15e pz_after=%.15e "
+	                  "pressure_before=%.15e pressure_after=%.15e "
+	                  "energy_update_consistent=%d\n",
+	                  MyProcessorNumber, cycle_number, level, this->GetGridID(),
+	                  (long long) ParticleNumber[p],
+	                  nindex % nx, (nindex / nx) % ny, nindex / (nx*ny), nindex,
+	                  dm, removal_fraction,
+	                  rho_old, rho_new, te_old, te_after, ge_old, ge_after,
+	                  vx, vy, vz, vx, vy, vz,
+	                  rho_old*vx, rho_old*vy, rho_old*vz,
+	                  rho_new*vx, rho_new*vy, rho_new*vz,
+	                  pressure_old, pressure_after,
+	                  cell_energy_update_consistent);
+	        }
+
+	        removed_mass += dm;
         delta_px += dm * remove_velx[n];
         delta_py += dm * remove_vely[n];
         delta_pz += dm * remove_velz[n];
@@ -762,12 +922,55 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       const double post_flag_tol = 1.0e-8 * max(1.0, dm_requested);
       if (dm_removed_total + post_flag_tol < dm_requested)
         removal_gas_limited = 1;
-    } else {
-      frac_gas = 1.0;
-      removal_gas_limited = 0;
-    }
+	    } else {
+	      frac_gas = 1.0;
+	      removal_gas_limited = 0;
+	    }
 
-    double mdot_hot_realized = mdot_hot_capped * frac_gas;
+	    const double log_min_density_before =
+	      (min_density_before == DBL_MAX) ? -1.0 : min_density_before;
+	    const double log_min_density_after =
+	      (min_density_after == DBL_MAX) ? -1.0 : min_density_after;
+	    const double log_min_eint_before =
+	      (min_eint_before == DBL_MAX) ? -1.0 : min_eint_before;
+	    const double log_min_eint_after =
+	      (min_eint_after == DBL_MAX) ? -1.0 : min_eint_after;
+	    const double log_min_pressure_before =
+	      (min_pressure_before == DBL_MAX) ? -1.0 : min_pressure_before;
+	    const double log_min_pressure_after =
+	      (min_pressure_after == DBL_MAX) ? -1.0 : min_pressure_after;
+
+	    if (BHAccretionVerbose >= 1) {
+	      fprintf(logptr,
+	              "[BHACCR_SRC] rank=%d step=%d level=%d grid_id=%d bh_id=%lld "
+	              "kernel_radius_over_dx=%.8g kernel_cells_requested=%lld "
+	              "kernel_cells_valid=%d kernel_cells_active=%d kernel_truncated=%d "
+	              "accretion_source_rejected=%d removal_cells=%d "
+	              "removal_kernel_gas=%.15e removal_kernel_safe_gas=%.15e "
+	              "dm_requested=%.15e dm_removed=%.15e "
+	              "max_cell_removal_fraction=%.8g max_allowed_cell_removal_fraction=%.8g "
+	              "min_density_before=%.15e min_density_after=%.15e "
+	              "min_internal_energy_before=%.15e min_internal_energy_after=%.15e "
+	              "min_pressure_before=%.15e min_pressure_after=%.15e "
+	              "cells_clamped=%d cells_rejected_by_floor=%d "
+	              "energy_update_consistent=%d\n",
+	              MyProcessorNumber, cycle_number, level, this->GetGridID(),
+	              (long long) ParticleNumber[p],
+	              kernel_cells_per_radius, n_kernel_cells_requested,
+	              n_kernel_cells, n_kernel_active_cells, kernel_truncated,
+	              accretion_source_rejected, removal_cells,
+	              removal_kernel_gas, removal_kernel_safe_gas,
+	              dm_requested, dm_removed_total,
+	              max_cell_removal_fraction,
+	              BHAccretionMaxCellRemovalFraction,
+	              log_min_density_before, log_min_density_after,
+	              log_min_eint_before, log_min_eint_after,
+	              log_min_pressure_before, log_min_pressure_after,
+	              n_cells_clamped, n_floor_rejected_cells,
+	              (n_energy_consistency_fail == 0) ? 1 : 0);
+	    }
+
+	    double mdot_hot_realized = mdot_hot_capped * frac_gas;
     double mdot_cold_realized = mdot_cold_capped * frac_gas;
 
     if (dt_code > 0.0) {
@@ -837,12 +1040,14 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     }
 
     if (BHAccretionVerbose >= 1) {
-      fprintf(logptr,
-              "[BHACCR_DEBUG] step=%d level=%d bh_id=%lld "
-              "Mdot_total_capped=%.15e dm_requested=%.15e "
-              "removal_kernel_gas=%.15e dm_removed=%.15e\n",
-              cycle_number, level, (long long) ParticleNumber[p],
-              mdot_total_capped, dm_requested, removal_kernel_gas, dm_removed_total);
+	      fprintf(logptr,
+	              "[BHACCR_DEBUG] step=%d level=%d bh_id=%lld "
+	              "Mdot_total_capped=%.15e dm_requested=%.15e "
+	              "removal_kernel_gas=%.15e removal_kernel_safe_gas=%.15e "
+	              "dm_removed=%.15e\n",
+	              cycle_number, level, (long long) ParticleNumber[p],
+	              mdot_total_capped, dm_requested, removal_kernel_gas,
+	              removal_kernel_safe_gas, dm_removed_total);
 
       if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS &&
           NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS) {
@@ -875,12 +1080,11 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       (acc_ignored_dv_kms > double(BHAccretionIgnoredDVWarn) ||
        acc_ignored_p_frac > double(BHAccretionIgnoredPFracWarn)) ? 1 : 0;
 
-    const double accretion_wall_ms = 1000.0 * (ReturnWallTime() - t0_all);
+	    const double accretion_wall_ms = 1000.0 * (ReturnWallTime() - t0_all);
 
-    if (BHAccretionVerbose >= 1) {
-      const double kernel_cells_per_radius = kernel_radius_code / cell_width;
-      if (kernel_cells_per_radius < 1.5)
-        fprintf(logptr,
+	    if (BHAccretionVerbose >= 1) {
+	      if (kernel_cells_per_radius < 1.5)
+	        fprintf(logptr,
                 "[BHACCR_WARN] step=%d level=%d bh_id=%lld kernel_radius_over_dx=%.6g "
                 "kernel under-resolved (<1.5 cells).\n",
                 cycle_number, level, (long long) ParticleNumber[p],
@@ -889,9 +1093,18 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
         fprintf(logptr,
                 "[BHACCR_WARN] step=%d level=%d bh_id=%lld kernel_radius_over_dx=%.6g "
                 "kernel may exceed ghost-zone support (>3 cells).\n",
-                cycle_number, level, (long long) ParticleNumber[p],
-                kernel_cells_per_radius);
-      if (n_kernel_cells > 0 && (2*n_fallback_cells > n_kernel_cells))
+	                cycle_number, level, (long long) ParticleNumber[p],
+	                kernel_cells_per_radius);
+	      if (accretion_source_rejected)
+	        fprintf(logptr,
+	                "[BHACCR_WARN] step=%d level=%d bh_id=%lld "
+	                "accretion_source_rejected=1 kernel_radius_over_dx=%.6g "
+	                "NumberOfGhostZones=%d kernel_truncated_by_grid=%d; "
+	                "diagnostics retained but gas removal skipped.\n",
+	                cycle_number, level, (long long) ParticleNumber[p],
+	                kernel_cells_per_radius, NumberOfGhostZones,
+	                kernel_truncated_by_grid);
+	      if (n_kernel_cells > 0 && (2*n_fallback_cells > n_kernel_cells))
         fprintf(logptr,
                 "[BHACCR_WARN] step=%d level=%d bh_id=%lld n_fallback_cells=%d "
                 "n_kernel_cells=%d fallback fraction exceeds 50%%.\n",
@@ -929,10 +1142,12 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "Mdot_hot_raw=%.8e Mdot_cold_raw=%.8e Mdot_total_raw=%.8e "
               "Mdot_Edd=%.8e f_Edd=%.8e alpha_boost=%.8g f_AM=%.8g "
               "Mdot_actual=%.8e Mdot_hot_actual=%.8e Mdot_cold_actual=%.8e "
-              "cap_active=%d accretion_diag_wall_ms=%.4f "
-              "dm_requested=%.8e dm_removed=%.8e dm_removed_msun=%.8e "
-              "frac_cap=%.8g frac_gas=%.8g removal_gas_limited=%d "
-              "Mdot_hot_realized=%.8e Mdot_cold_realized=%.8e bh_mass_new=%.8g "
+	              "cap_active=%d accretion_diag_wall_ms=%.4f "
+	              "dm_requested=%.8e dm_removed=%.8e dm_removed_msun=%.8e "
+	              "frac_cap=%.8g frac_gas=%.8g removal_gas_limited=%d "
+	              "kernel_truncated=%d accretion_source_rejected=%d "
+	              "removal_kernel_safe_gas=%.8e "
+	              "Mdot_hot_realized=%.8e Mdot_cold_realized=%.8e bh_mass_new=%.8g "
               "removal_cells=%d n_sf_blocked_cells=%d "
               "acc_ignored_dv_kms=%.8g acc_ignored_p_frac=%.8g acc_momentum_warn=%d "
               "accretion_wall_ms=%.4f lambda_edd=%.8e edd_factor=%.8g\n",
@@ -951,9 +1166,11 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               mdot_hot_actual * mdot_to_msunyr,
               mdot_cold_actual * mdot_to_msunyr,
               cap_active, accretion_diag_wall_ms,
-              dm_requested, dm_removed_total, dm_removed_msun,
-              frac_cap, frac_gas, removal_gas_limited,
-              mdot_hot_realized * mdot_to_msunyr,
+	              dm_requested, dm_removed_total, dm_removed_msun,
+	              frac_cap, frac_gas, removal_gas_limited,
+	              kernel_truncated, accretion_source_rejected,
+	              removal_kernel_safe_gas,
+	              mdot_hot_realized * mdot_to_msunyr,
               mdot_cold_realized * mdot_to_msunyr,
               bh_mass_new_msun,
               removal_cells, n_sf_blocked_cells,

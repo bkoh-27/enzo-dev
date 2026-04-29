@@ -2237,6 +2237,9 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
       BHSeedMetallicityThresholdInSolar * BH_SEED_Z_SUN;
   }
 
+  if (BHSeedingMethod != 0 && BHSeedingMethod != 1)
+    ENZO_FAIL("BHSeedingMethod must be 0 (off) or 1 (enabled).");
+
   if (BHSeedingMethod) {
     if (BHSeedMass <= 0.0f)
       ENZO_FAIL("BHSeedMass must be positive.");
@@ -2264,7 +2267,7 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   }
 
   if (BHRepositionMethod < 0 || BHRepositionMethod > 2)
-    ENZO_FAIL("BHRepositionMethod must be 0 (diagnostics scaffold), 1 (rate-limited drift), or 2 (teleport debug).");
+    ENZO_FAIL("BHRepositionMethod must be 0 (diagnostics-only when BHRepositionVerbose > 0), 1 (rate-limited drift), or 2 (teleport debug).");
   if (BHRepositionSearchRadius <= 0.0f)
     ENZO_FAIL("BHRepositionSearchRadius must be positive (units: physical kpc).");
   if (BHRepositionMaxDisplacement < 0.0f)
@@ -2273,7 +2276,7 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ENZO_FAIL("BHRepositionDiagnosePotential must be 0 or 1.");
 
   if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
-    ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics).");
+    ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics/source path).");
 
   if (BHAccretionMethod) {
     if (BHAccretionKernelRadius <= 0.0f)

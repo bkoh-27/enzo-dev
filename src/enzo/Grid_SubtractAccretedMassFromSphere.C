@@ -28,6 +28,7 @@
 #include "Hierarchy.h"
 #include "CosmologyParameters.h"
 #include "phys_constants.h"
+#include "BHAccretionSafety.h"
 
 int FindField(int field, int farray[], int numfields);
 
@@ -159,6 +160,53 @@ int grid::SubtractAccretedMassFromSphere(Star *cstar, int level, float radius, f
 	      BaryonField[TENum][index] += 
 		0.5 * BaryonField[Vel1Num+dim][index] * 
 		BaryonField[Vel1Num+dim][index];
+
+	  const double rho_new = BaryonField[DensNum][index];
+	  const double vx_new = BaryonField[Vel1Num][index];
+	  const double vy_new = BaryonField[Vel2Num][index];
+	  const double vz_new = BaryonField[Vel3Num][index];
+	  const double v2_new =
+	    vx_new*vx_new + vy_new*vy_new + vz_new*vz_new;
+	  const double ge_floor =
+	    BHAccretionGasEnergyFloor(rho_new, tiny_number, Gamma);
+	  int clamped_energy = FALSE;
+
+	  if (HydroMethod == PPM_DirectEuler) {
+	    if (GENum >= 0 && DualEnergyFormalism) {
+	      double ge_new = BaryonField[GENum][index];
+	      if (!isfinite(ge_new) || ge_new < ge_floor) {
+		ge_new = ge_floor;
+		BaryonField[GENum][index] = float(ge_new);
+		clamped_energy = TRUE;
+	      }
+	      BaryonField[TENum][index] = float(ge_new + 0.5*v2_new);
+	    } else {
+	      double eint_new = BaryonField[TENum][index] - 0.5*v2_new;
+	      if (!isfinite(eint_new) || eint_new < ge_floor) {
+		eint_new = ge_floor;
+		BaryonField[TENum][index] = float(eint_new + 0.5*v2_new);
+		clamped_energy = TRUE;
+	      }
+	    }
+	  } else if (HydroMethod == Zeus_Hydro) {
+	    double eint_new = BaryonField[TENum][index];
+	    if (!isfinite(eint_new) || eint_new < ge_floor) {
+	      BaryonField[TENum][index] = float(ge_floor);
+	      clamped_energy = TRUE;
+	    }
+	  }
+
+	  if (clamped_energy && BHAccretionVerbose >= 1)
+	    fprintf(stdout,
+		    "[MBHACCR_WARN] rank=%d level=%d grid_id=%d bh_id=%"ISYM" "
+		    "i=%d j=%d k=%d density=%.15e total_energy=%.15e "
+		    "gas_energy=%.15e pressure_floor=%.15e "
+		    "energy_clamped_after_mass_removal=1\n",
+		    MyProcessorNumber, level, this->GetGridID(), cstar->ReturnID(),
+		    i, j, k, BaryonField[DensNum][index],
+		    BaryonField[TENum][index],
+		    (GENum >= 0) ? BaryonField[GENum][index] : -1.0,
+		    tiny_number);
 	  
 	  /* Update species and colour fields */
 	  

@@ -61,7 +61,7 @@ Defaults are from `src/enzo/SetDefaultGlobalValues.C`.
 ### Core toggles
 | Parameter | Default | Meaning | Units |
 | --- | --- | --- | --- |
-| `BHSeedingMethod` | `1` | Master switch (`0` off, `1` on). | none |
+| `BHSeedingMethod` | `0` | Master switch (`0` off, `1` on). Seeding is opt-in; omitted parameters do not run seed creation. | none |
 | `BHSeedRunEveryTimestep` | `0` | `0` root-like cadence, `1` every sub-step. | bool int |
 | `BHSeedVerbose` | `1` | Verbosity for `[BHSEED]` and `[BHSEED_SEED]`. | level |
 

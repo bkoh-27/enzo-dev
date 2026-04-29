@@ -53,7 +53,7 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 
 | Parameter | Default | What it means in plain language | Units |
 | --- | --- | --- | --- |
-| `BHSeedingMethod` | `1` | `int`, **Phase 1 active**. Main on/off switch (`0` = disabled, `1` = enabled). | none |
+| `BHSeedingMethod` | `0` | `int`, **Phase 1 active**. Main on/off switch (`0` = disabled, `1` = enabled). Seeding is opt-in; omitted parameters do not run seed creation. | none |
 | `BHSeedOverdensityThreshold` | `1000.0` | `float`, **Phase 1 active**. Gas density must be at least this value to be considered for a seed. | code density units |
 | `BHSeedTemperatureThreshold` | `1e4` | `float`, **Phase 1 active**. Gas temperature must be below this value. | K |
 | `BHSeedMetallicityThreshold` | `1e-4` | `float`, **Phase 1 active**. Gas metallicity must be below this value. Lower value = more metal-poor requirement. | absolute metal mass fraction |
@@ -474,7 +474,7 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 
 | Parameter | Default | Phase A status |
 | --- | --- | --- |
-| `BHAccretionMethod` | `1` | active (`0` off, `1` two-channel diagnostics) |
+| `BHAccretionMethod` | `0` | active only when explicitly enabled (`0` off, `1` two-channel diagnostics/source path) |
 | `BHAccretionKernelRadius` | `3.0` | active (physical kpc) |
 | `BHAccretionRemovalRadius` | `1` | reserved (Phase B) |
 | `BHAccretionTSplitFloor` | `5e5` | active (K, fallback split) |
@@ -571,7 +571,7 @@ What Phase B still does **not** do:
 ### Accretion Parameters (Phase B Active Set)
 | Parameter | Default | Phase B status |
 | --- | --- | --- |
-| `BHAccretionMethod` | `1` | active (`0` off, `1` two-channel) |
+| `BHAccretionMethod` | `0` | active only when explicitly enabled (`0` off, `1` two-channel) |
 | `BHAccretionKernelRadius` | `3.0` | active (diagnostic kernel, physical kpc) |
 | `BHAccretionRemovalRadius` | `1` | active (removal kernel radius in cell widths) |
 | `BHAccretionRemovalMode` | `0` | active (`0` multi-cell, `1` single-cell debug) |
@@ -655,6 +655,8 @@ Call-site behavior in `EvolveLevel`:
   `BHRepositionVerbose > 0`.
 - `BHRepositionMethod=0` and `BHRepositionVerbose=0` means fully off
   (no handler call, no `[BHREPOS]` output).
+- `BHRepositionMethod=0` with `BHRepositionVerbose>0` is diagnostic-only:
+  it logs `[BHREPOS]` but never moves a particle.
 
 What Phase B does:
 - keeps deterministic BH selection/order/ownership and newly-seeded skip logic from Phase A,
@@ -663,6 +665,9 @@ What Phase B does:
   - method `1`: rate-limited drift, cap = `BHRepositionMaxDisplacement * dx_local`,
   - method `2`: teleport debug mode to active-zone peak,
 - applies a defensive active-zone clamp for floating-point edge cases,
+- rejects active movement when the requested search sphere exceeds local
+  ghost-zone/grid support; diagnostics are still logged with
+  `active_reposition_rejected=1`,
 - writes updated `ParticlePosition[dim][p]` directly,
 - leaves `ParticleVelocity` unchanged.
 
