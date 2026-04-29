@@ -1138,7 +1138,8 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "[BHACCR] step=%d level=%d z=%.8g bh_id=%lld bh_mass=%.8g "
               "f_hot=%.8g f_cold=%.8g n_hot_cells=%d n_cold_cells=%d n_fallback_cells=%d "
               "rho_hot_avg=%.8e rho_cold_avg=%.8e T_hot_avg=%.8e T_cold_avg=%.8e "
-              "cs_hot_avg=%.8e V_rot_cold=%.8e v_rel_hot=%.8e v_rel_cold=%.8e "
+              "cs_hot_avg=%.8e cs_cold_avg=%.8e V_rot_cold=%.8e "
+              "v_rel_hot=%.8e v_rel_cold=%.8e "
               "Mdot_hot_raw=%.8e Mdot_cold_raw=%.8e Mdot_total_raw=%.8e "
               "Mdot_Edd=%.8e f_Edd=%.8e alpha_boost=%.8g f_AM=%.8g "
               "Mdot_actual=%.8e Mdot_hot_actual=%.8e Mdot_cold_actual=%.8e "
@@ -1155,7 +1156,8 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               f_hot, f_cold, n_hot_cells, n_cold_cells, n_fallback_cells,
               hot_rho_avg * rho_to_cgs, cold_rho_avg * rho_to_cgs,
               hot_t_avg, cold_t_avg,
-              hot_cs_avg * vel_to_cgs, v_rot_cold * vel_to_cgs,
+              hot_cs_avg * vel_to_cgs, cold_cs_avg * vel_to_cgs,
+              v_rot_cold * vel_to_cgs,
               v_rel_hot * vel_to_cgs, v_rel_cold * vel_to_cgs,
               mdot_hot_raw * mdot_to_msunyr,
               mdot_cold_raw * mdot_to_msunyr,
