@@ -172,6 +172,9 @@ D0C_SEED_POSITION_ATOL = 1e-6
 D0C_SEED_DETERMINISTIC_POSITION_ATOL = 1e-15
 D0C_SEED_DETERMINISTIC_MASS_ATOL = 1e-20
 D0C_SEED_MPI_POSITION_ATOL = 1e-12
+D0C_REPOS_POSITION_ATOL = 1e-10
+D0C_REPOS_ZERO_ATOL = 1e-12
+D0C_REPOS_COUNTER_MAX_SAFE = 1000000000
 
 T10_BHACCR_NUMERIC_FIELDS = (
     ("lambda_edd", ("lambda_edd",)),
@@ -393,6 +396,15 @@ def d0c_seed_opt_in_overrides(**overrides):
         "BHAccretionMethod": 0,
         "BHFeedbackMethod": 0,
     }
+    params.update(overrides)
+    return params
+
+
+def d0c_repos_base_overrides(**overrides):
+    params = d0c_seed_opt_in_overrides(
+        BHRepositionMethod=0,
+        BHRepositionVerbose=1,
+    )
     params.update(overrides)
     return params
 
@@ -1171,6 +1183,21 @@ def diagnostic_lines(log, tag, warn_tag=None):
         line for line in lines(log, tag)
         if not warn_tag or warn_tag not in line
     ]
+
+
+def bhrepos_rows(log, min_step=0):
+    return rows_for(log, "[BHREPOS]", min_step=min_step)
+
+
+def bhrepos_warn_rows(log, min_step=0):
+    rows = []
+    for line in lines(log, "[BHREPOS_WARN]"):
+        row = parse_kv(line)
+        step = row.get("step")
+        if isinstance(step, int) and step < min_step:
+            continue
+        rows.append(row)
+    return rows
 
 
 def seed_created_total(log, min_step=0):
@@ -2352,6 +2379,522 @@ def run_d0c_seed_s4(s1_result):
     return validate_d0c_seed_s4(s4, reference_particles[0], mpirun_path)
 
 
+def d0c_repos_failure(name, expected, actual, row=None, line=None):
+    raw = line if line is not None else (row.get("__line", "") if row else "")
+    parts = [f"{name}: expected {expected}; actual {actual}"]
+    if raw:
+        parts.append(f"raw={raw}")
+    if row is not None:
+        parts.append(f"parsed={row}")
+    return "; ".join(parts)
+
+
+def d0c_repos_expect_equal(errors, name, row, field, expected):
+    actual = row.get(field, "<missing>")
+    if actual != expected:
+        errors.append(d0c_repos_failure(
+            name, f"{field} == {expected!r}", actual, row=row))
+
+
+def d0c_repos_expect_int_in(errors, name, row, field, allowed):
+    actual = row.get(field, "<missing>")
+    if not isinstance(actual, int) or actual not in allowed:
+        errors.append(d0c_repos_failure(
+            name, f"{field} in {sorted(allowed)}", actual, row=row))
+
+
+def d0c_repos_expect_close(
+        errors, name, row, field, expected, rel_tol=0.0,
+        abs_tol=D0C_REPOS_ZERO_ATOL):
+    actual = row.get(field, "<missing>")
+    if not is_finite_number(actual) or not math.isclose(
+            float(actual), float(expected), rel_tol=rel_tol, abs_tol=abs_tol):
+        errors.append(d0c_repos_failure(
+            name,
+            f"{field} ~= {expected!r} rel_tol={rel_tol} abs_tol={abs_tol}",
+            actual,
+            row=row,
+        ))
+
+
+def d0c_repos_expect_finite(errors, name, row, field, minimum=None):
+    actual = row.get(field, "<missing>")
+    if not is_finite_number(actual):
+        errors.append(d0c_repos_failure(name, f"{field} finite", actual, row=row))
+        return
+    if minimum is not None and float(actual) < float(minimum):
+        errors.append(d0c_repos_failure(
+            name, f"{field} >= {minimum}", actual, row=row))
+
+
+def d0c_repos_validate_boolean_counter_safety(errors, name, row):
+    for field in (
+            "diag_peak_in_ghost", "active_target_exists",
+            "reposition_occurred", "reposition_clamped",
+            "newly_seeded_skip", "diagnostic_only",
+            "search_kernel_truncated", "active_reposition_rejected"):
+        if field in row:
+            d0c_repos_expect_int_in(errors, name, row, field, {0, 1})
+    if "method" in row:
+        d0c_repos_expect_int_in(errors, name, row, "method", {0, 1, 2})
+    for field in ("search_cells", "search_active_cells"):
+        if field not in row:
+            continue
+        actual = row.get(field)
+        if (not isinstance(actual, int) or actual < 0 or
+                actual > D0C_REPOS_COUNTER_MAX_SAFE):
+            errors.append(d0c_repos_failure(
+                name,
+                f"{field} non-negative initialized counter <= "
+                f"{D0C_REPOS_COUNTER_MAX_SAFE}",
+                actual,
+                row=row,
+            ))
+
+
+def d0c_repos_validate_seed_formed(errors, name, case):
+    seed_total = seed_created_total(case.log, min_step=0)
+    seed_rows = bhseed_seed_rows(case.log, min_step=0)
+    if seed_total != 1:
+        errors.append(d0c_repos_failure(
+            name, "seed_created_total(log, min_step=0) == 1", seed_total))
+    if len(seed_rows) != 1:
+        raw = lines(case.log, "[BHSEED_SEED]")
+        errors.append(d0c_repos_failure(
+            name, "exactly one [BHSEED_SEED] line", len(seed_rows),
+            line=raw[0] if raw else "",
+        ))
+        return {}
+    seed_row = seed_rows[0]
+    for field, expected in zip(("x", "y", "z"), D0C_SEED_EXPECTED_POSITION):
+        d0c_seed_expect_close(
+            errors, name, seed_row, field, expected,
+            abs_tol=D0C_SEED_POSITION_ATOL,
+        )
+    return seed_row
+
+
+def d0c_repos_regular_rows(log):
+    return [row for row in bhrepos_rows(log, min_step=0)
+            if row.get("newly_seeded_skip") == 0]
+
+
+def d0c_repos_skip_rows(log):
+    return [row for row in bhrepos_rows(log, min_step=0)
+            if row.get("newly_seeded_skip") == 1]
+
+
+def d0c_repos_position_from_seed(seed_row):
+    if not seed_row:
+        return None
+    if not all(field in seed_row and is_finite_number(seed_row[field])
+               for field in ("x", "y", "z")):
+        return None
+    return (float(seed_row["x"]), float(seed_row["y"]), float(seed_row["z"]))
+
+
+def d0c_repos_position_is_finite_in_unit_grid(position):
+    return (
+        isinstance(position, (tuple, list)) and len(position) == 3 and
+        all(math.isfinite(float(value)) and 0.0 <= float(value) <= 1.0
+            for value in position)
+    )
+
+
+def d0c_repos_expect_position_close(
+        errors, name, actual, expected, label, abs_tol=D0C_REPOS_POSITION_ATOL):
+    if actual is None or expected is None:
+        errors.append(d0c_repos_failure(
+            name, f"{label} position readable", {"actual": actual, "expected": expected}))
+        return
+    for dim, (left, right) in enumerate(zip(actual, expected)):
+        if not math.isclose(
+                float(left), float(right), rel_tol=0.0, abs_tol=abs_tol):
+            errors.append(d0c_repos_failure(
+                name,
+                f"{label}[{dim}] matches within {abs_tol}",
+                {"actual": left, "expected": right},
+            ))
+
+
+def d0c_repos_final_particle(name, case, errors):
+    particle, records, meta, particle_errors = d0c_seed_single_particle(name, case)
+    errors.extend(particle_errors)
+    position = d0c_seed_particle_position(particle) if particle is not None else None
+    if position is not None and not d0c_repos_position_is_finite_in_unit_grid(position):
+        errors.append(d0c_repos_failure(
+            name, "final HDF5 BH position finite and inside unit grid", position))
+    return particle, records, meta, position
+
+
+def d0c_repos_no_accr_feedback_errors(name, case):
+    errors = []
+    bhaccr_lines = diagnostic_lines(case.log, "[BHACCR]", warn_tag="[BHACCR_WARN]")
+    bhfdbk_lines = diagnostic_lines(case.log, "[BHFDBK]", warn_tag="[BHFDBK_WARN]")
+    if bhaccr_lines:
+        errors.append(d0c_repos_failure(
+            name, "zero non-WARN [BHACCR] rows", len(bhaccr_lines),
+            line=bhaccr_lines[0],
+        ))
+    if bhfdbk_lines:
+        errors.append(d0c_repos_failure(
+            name, "zero non-WARN [BHFDBK] rows", len(bhfdbk_lines),
+            line=bhfdbk_lines[0],
+        ))
+    return errors, bhaccr_lines, bhfdbk_lines
+
+
+def validate_d0c_repos_r0(case):
+    name = "D0c-repos R0 newly seeded skip diagnostic"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    seed_row = d0c_repos_validate_seed_formed(errors, name, case)
+    skip_rows = d0c_repos_skip_rows(case.log)
+    if not skip_rows:
+        errors.append(d0c_repos_failure(
+            name, "at least one [BHREPOS] row with newly_seeded_skip=1",
+            len(skip_rows),
+        ))
+        representative = {}
+    else:
+        representative = skip_rows[0]
+        d0c_repos_expect_equal(errors, name, representative, "reposition_occurred", 0)
+        d0c_repos_expect_close(errors, name, representative, "displacement_kpc", 0.0)
+        d0c_repos_expect_close(errors, name, representative, "displacement_cells", 0.0)
+        d0c_repos_expect_int_in(
+            errors, name, representative, "search_kernel_truncated", {0, 1})
+        d0c_repos_expect_int_in(
+            errors, name, representative, "active_reposition_rejected", {0, 1})
+        d0c_repos_expect_equal(errors, name, representative, "search_cells", 0)
+        d0c_repos_expect_equal(errors, name, representative, "search_active_cells", 0)
+        d0c_repos_validate_boolean_counter_safety(errors, name, representative)
+
+    metrics = {
+        "run_dir": str(case.cdir),
+        "seed_row": seed_row,
+        "bhrepos_skip_rows": len(skip_rows),
+        "representative_bhrepos_skip_row": representative,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "newly seeded skip row has initialized boolean/counter diagnostics",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_repos_r1(case):
+    name = "D0c-repos R1 method0 diagnostic no movement"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    seed_row = d0c_repos_validate_seed_formed(errors, name, case)
+    seed_position = d0c_repos_position_from_seed(seed_row)
+    all_rows = bhrepos_rows(case.log, min_step=0)
+    regular_rows = d0c_repos_regular_rows(case.log)
+    warn_lines = [
+        line for line in lines(case.log, "[BHREPOS_WARN]")
+        if "BHRepositionMethod=0" in line and "diagnostics only" in line
+    ]
+    if not all_rows:
+        errors.append(d0c_repos_failure(
+            name, "[BHREPOS] rows are present", len(all_rows)))
+    if not warn_lines:
+        errors.append(d0c_repos_failure(
+            name,
+            "method-0 diagnostic-only [BHREPOS_WARN] line present",
+            len(warn_lines),
+        ))
+    if not regular_rows:
+        errors.append(d0c_repos_failure(
+            name, "at least one non-newly-seeded [BHREPOS] row", len(regular_rows)))
+    for row in regular_rows:
+        d0c_repos_expect_equal(errors, name, row, "reposition_occurred", 0)
+        d0c_repos_expect_close(errors, name, row, "displacement_kpc", 0.0)
+        d0c_repos_expect_close(errors, name, row, "displacement_cells", 0.0)
+        d0c_repos_validate_boolean_counter_safety(errors, name, row)
+
+    particle, records, meta, final_position = d0c_repos_final_particle(name, case, errors)
+    d0c_repos_expect_position_close(
+        errors, name, final_position, seed_position, "final seeded BH position")
+    no_source_errors, bhaccr_lines, bhfdbk_lines = d0c_repos_no_accr_feedback_errors(
+        name, case)
+    errors.extend(no_source_errors)
+
+    representative = regular_rows[0] if regular_rows else (all_rows[0] if all_rows else {})
+    metrics = {
+        "run_dir": str(case.cdir),
+        "seed_row": seed_row,
+        "seed_position": seed_position,
+        "final_position": final_position,
+        "bhrepos_rows": len(all_rows),
+        "bhrepos_regular_rows": len(regular_rows),
+        "representative_bhrepos_row": representative,
+        "method0_warning": warn_lines[0] if warn_lines else "",
+        "bhaccr_lines": len(bhaccr_lines),
+        "bhfdbk_lines": len(bhfdbk_lines),
+        "bh_particles": [d0c_seed_particle_summary(record) for record in records],
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"method=0 diagnostics emitted without movement; final_position={final_position}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_repos_r2(case):
+    name = "D0c-repos R2 method2 safety rejection"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    seed_row = d0c_repos_validate_seed_formed(errors, name, case)
+    seed_position = d0c_repos_position_from_seed(seed_row)
+    all_rows = bhrepos_rows(case.log, min_step=0)
+    skip_rows = d0c_repos_skip_rows(case.log)
+    regular_rows = d0c_repos_regular_rows(case.log)
+    warn_rows = bhrepos_warn_rows(case.log, min_step=0)
+    rejection_warns = [
+        row for row in warn_rows
+        if row.get("active_reposition_rejected") == 1 or
+        "active_reposition_rejected=1" in row.get("__line", "")
+    ]
+    if not all_rows:
+        errors.append(d0c_repos_failure(
+            name, "[BHREPOS] rows are present", len(all_rows)))
+    if skip_rows:
+        d0c_repos_expect_equal(errors, name, skip_rows[0], "method", 2)
+    else:
+        errors.append(d0c_repos_failure(
+            name, "newly_seeded_skip [BHREPOS] row reflects method 2", len(skip_rows)))
+    for row in rejection_warns:
+        if "bh_id" not in row:
+            errors.append(d0c_repos_failure(
+                name, "active_reposition_rejected warning associated with bh_id",
+                "<missing>",
+                row=row,
+            ))
+        raw = row.get("__line", "")
+        if "search_truncated_by_grid" not in row and "search_truncated_by_grid" not in raw:
+            errors.append(d0c_repos_failure(
+                name,
+                "active_reposition_rejected warning reports search_truncated_by_grid",
+                row,
+                row=row,
+            ))
+
+    moved_rows = [row for row in regular_rows if row.get("reposition_occurred") == 1]
+    for row in regular_rows:
+        d0c_repos_validate_boolean_counter_safety(errors, name, row)
+    particle, records, meta, final_position = d0c_repos_final_particle(name, case, errors)
+
+    if rejection_warns or not moved_rows:
+        for row in regular_rows:
+            d0c_repos_expect_equal(errors, name, row, "reposition_occurred", 0)
+            d0c_repos_expect_close(errors, name, row, "displacement_kpc", 0.0)
+            d0c_repos_expect_close(errors, name, row, "displacement_cells", 0.0)
+        d0c_repos_expect_position_close(
+            errors, name, final_position, seed_position,
+            "final BH position after rejected/no method2 movement",
+        )
+        movement_status = "rejected" if rejection_warns else "no_target_or_no_movement"
+    else:
+        for row in moved_rows:
+            d0c_repos_expect_finite(errors, name, row, "displacement_kpc", minimum=0.0)
+            d0c_repos_expect_finite(errors, name, row, "displacement_cells", minimum=0.0)
+            d0c_repos_expect_equal(errors, name, row, "active_target_exists", 1)
+            if (is_finite_number(row.get("displacement_cells")) and
+                    float(row["displacement_cells"]) > D0C_REPOS_COUNTER_MAX_SAFE):
+                errors.append(d0c_repos_failure(
+                    name,
+                    "method2 movement displacement_cells bounded",
+                    row.get("displacement_cells"),
+                    row=row,
+                ))
+        movement_status = "finite_movement"
+
+    metrics = {
+        "run_dir": str(case.cdir),
+        "seed_row": seed_row,
+        "seed_position": seed_position,
+        "final_position": final_position,
+        "movement_status": movement_status,
+        "bhrepos_rows": len(all_rows),
+        "bhrepos_regular_rows": len(regular_rows),
+        "bhrepos_rejection_warnings": len(rejection_warns),
+        "representative_bhrepos_row": (
+            moved_rows[0] if moved_rows else
+            (regular_rows[0] if regular_rows else (all_rows[0] if all_rows else {}))
+        ),
+        "representative_bhrepos_warn": rejection_warns[0] if rejection_warns else {},
+        "bh_particles": [d0c_seed_particle_summary(record) for record in records],
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"method=2 active with {movement_status}; final_position={final_position}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_repos_r3(np1_case, np4_case, mpirun_path):
+    name = "D0c-repos R3 optional MPI BHREPOS consistency"
+    if np4_case.timed_out or np4_case.rc != 0:
+        reason = (
+            f"np=4 mpirun launch did not complete cleanly rc={np4_case.rc} "
+            f"timed_out={np4_case.timed_out}"
+        )
+        if np4_case.timed_out or mpi_environment_failure(np4_case.log):
+            return skip_result(
+                name,
+                reason,
+                {"run_dir": str(np4_case.cdir), "mpirun": mpirun_path},
+                str(np4_case.log),
+            )
+        return fail_result(name, reason, {"mpirun": mpirun_path}, str(np4_case.log))
+    if np1_case.timed_out or np1_case.rc != 0:
+        return skip_result(
+            name,
+            "np=1 reference run unavailable; optional R3 not attempted",
+            {
+                "np1_rc": np1_case.rc,
+                "np1_timed_out": np1_case.timed_out,
+                "mpirun": mpirun_path,
+            },
+            str(np1_case.log),
+        )
+
+    errors = []
+    seed_total_1 = seed_created_total(np1_case.log, min_step=0)
+    seed_total_4 = seed_created_total(np4_case.log, min_step=0)
+    if seed_total_1 != seed_total_4 or seed_total_1 != 1:
+        errors.append(d0c_repos_failure(
+            name,
+            "np=1 and np=4 seed counts both equal 1",
+            {"np1": seed_total_1, "np4": seed_total_4},
+        ))
+
+    skip_1 = d0c_repos_skip_rows(np1_case.log)
+    skip_4 = d0c_repos_skip_rows(np4_case.log)
+    if not skip_1:
+        errors.append(d0c_repos_failure(
+            name, "np=1 newly_seeded_skip BHREPOS row parseable", len(skip_1)))
+        skip_row_1 = {}
+    else:
+        skip_row_1 = skip_1[0]
+        d0c_repos_validate_boolean_counter_safety(errors, name, skip_row_1)
+    if not skip_4:
+        errors.append(d0c_repos_failure(
+            name, "np=4 newly_seeded_skip BHREPOS row parseable", len(skip_4)))
+        skip_row_4 = {}
+    else:
+        skip_row_4 = skip_4[0]
+        d0c_repos_validate_boolean_counter_safety(errors, name, skip_row_4)
+    for field in ("newly_seeded_skip", "search_kernel_truncated",
+                  "active_reposition_rejected"):
+        if skip_row_1 and skip_row_4 and skip_row_1.get(field) != skip_row_4.get(field):
+            errors.append(d0c_repos_failure(
+                name,
+                f"safe skip field {field} matches np=1 and np=4",
+                {"np1": skip_row_1.get(field), "np4": skip_row_4.get(field)},
+                row=skip_row_4,
+            ))
+
+    particle_1, records_1, meta_1, particle_errors_1 = d0c_seed_single_particle(
+        name, np1_case)
+    particle_4, records_4, meta_4, particle_errors_4 = d0c_seed_single_particle(
+        name, np4_case)
+    errors.extend(f"np=1 {err}" for err in particle_errors_1)
+    errors.extend(f"np=4 {err}" for err in particle_errors_4)
+    pos_1 = d0c_seed_particle_position(particle_1) if particle_1 is not None else None
+    pos_4 = d0c_seed_particle_position(particle_4) if particle_4 is not None else None
+    if particle_1 is not None and particle_4 is not None:
+        if int(abs(float(particle_1.get("ParticleType")))) != int(abs(float(particle_4.get("ParticleType")))):
+            errors.append(d0c_repos_failure(
+                name,
+                "np=1 and np=4 HDF5 BH ParticleType match",
+                {"np1": particle_1.get("ParticleType"), "np4": particle_4.get("ParticleType")},
+            ))
+        for label, particle, position in (
+                ("np=1", particle_1, pos_1), ("np=4", particle_4, pos_4)):
+            if not is_finite_number(particle.get("ParticleMass")):
+                errors.append(d0c_repos_failure(
+                    name, f"{label} ParticleMass finite", particle.get("ParticleMass")))
+            if not d0c_repos_position_is_finite_in_unit_grid(position):
+                errors.append(d0c_repos_failure(
+                    name, f"{label} ParticlePosition finite and in unit grid", position))
+        if (is_finite_number(particle_1.get("ParticleMass")) and
+                is_finite_number(particle_4.get("ParticleMass")) and
+                not math.isclose(
+                    float(particle_1["ParticleMass"]), float(particle_4["ParticleMass"]),
+                    rel_tol=0.0, abs_tol=D0C_SEED_DETERMINISTIC_MASS_ATOL)):
+            errors.append(d0c_repos_failure(
+                name,
+                f"np=4 ParticleMass matches np=1 within "
+                f"{D0C_SEED_DETERMINISTIC_MASS_ATOL}",
+                {"np1": particle_1.get("ParticleMass"),
+                 "np4": particle_4.get("ParticleMass")},
+            ))
+        d0c_repos_expect_position_close(
+            errors, name, pos_4, pos_1, "np=4 vs np=1 final BH position",
+            abs_tol=D0C_SEED_MPI_POSITION_ATOL,
+        )
+
+    metrics = {
+        "run_dirs": {"np1": str(np1_case.cdir), "np4": str(np4_case.cdir)},
+        "mpirun": mpirun_path,
+        "seed_created_total": {"np1": seed_total_1, "np4": seed_total_4},
+        "skip_rows": {"np1": skip_row_1, "np4": skip_row_4},
+        "safe_fields_compared": (
+            "newly_seeded_skip",
+            "search_kernel_truncated",
+            "active_reposition_rejected",
+        ),
+        "hdf5_bh_particles": {"np1": len(records_1), "np4": len(records_4)},
+        "bh_particles": {
+            "np1": [d0c_seed_particle_summary(record) for record in records_1],
+            "np4": [d0c_seed_particle_summary(record) for record in records_4],
+        },
+        "final_outputs": {"np1": meta_1, "np4": meta_4},
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(np4_case.log))
+    return pass_result(
+        name,
+        "np=1 and np=4 matched seed count, finite BH HDF5 fields, and safe skip diagnostics",
+        metrics,
+        str(np4_case.log),
+    )
+
+
+def run_d0c_repos_r3(np1_case):
+    name = "D0c-repos R3 optional MPI BHREPOS consistency"
+    mpirun_path = str(DEFAULT_MPIRUN)
+    if not executable_available(mpirun_path):
+        return skip_result(name, f"mpirun unavailable: {mpirun_path}", {"mpirun": mpirun_path})
+    np4_dir = prepare_case(
+        "D0c_repos_R3_optional_mpi_np4_bhrepos_consistency",
+        d0c_repos_base_overrides(BHRepositionMethod=0, BHRepositionVerbose=1),
+    )
+    np4_case = run_enzo(np4_dir, np_ranks=4, mpirun=mpirun_path)
+    return validate_d0c_repos_r3(np1_case, np4_case, mpirun_path)
+
+
 def unique_id_map(records):
     out = {}
     for record in records:
@@ -3174,12 +3717,19 @@ def main(argv=None):
             "D0c-seed S1 explicit opt-in seed creation",
             "D0c-seed S2 temperature gate no-seed",
             "D0c-seed S3 deterministic np1 repeat",
+            "D0c-repos R0 newly seeded skip diagnostic",
+            "D0c-repos R1 method0 diagnostic no movement",
+            "D0c-repos R2 method2 safety rejection",
             "T8 negative BHFeedbackEddingtonFactor validation",
             "T9 efficiency product > 1.0 validation",
         ):
             results.append(fail_result(name, f"preflight failed: {reason}"))
         results.append(skip_result(
             "D0c-seed S4 optional MPI seed consistency",
+            f"preflight unavailable: {reason}",
+        ))
+        results.append(skip_result(
+            "D0c-repos R3 optional MPI BHREPOS consistency",
             f"preflight unavailable: {reason}",
         ))
     else:
@@ -3325,6 +3875,20 @@ def main(argv=None):
         )
         results.append(validate_d0c_seed_s3(s3_a, s3_b))
         results.append(run_d0c_seed_s4(s1_result))
+
+        repos_r0_r1 = run_named(
+            "D0c_repos_R0_R1_method0_diagnostic",
+            d0c_repos_base_overrides(BHRepositionMethod=0, BHRepositionVerbose=1),
+        )
+        results.append(validate_d0c_repos_r0(repos_r0_r1))
+        results.append(validate_d0c_repos_r1(repos_r0_r1))
+
+        repos_r2 = run_named(
+            "D0c_repos_R2_method2_safety_rejection",
+            d0c_repos_base_overrides(BHRepositionMethod=2, BHRepositionVerbose=1),
+        )
+        results.append(validate_d0c_repos_r2(repos_r2))
+        results.append(run_d0c_repos_r3(repos_r0_r1))
 
     results.append(run_optional_phaseb_lite(include_phaseb))
     results.append(validate_h1(start_snapshot))
