@@ -84,6 +84,9 @@ EFFICIENCY_PRODUCT_FATAL = (
     "Product BHAccretionRadiativeEfficiency * "
     "BHFeedbackThermalEfficiency exceeds 1.0"
 )
+DUAL_MBH_BHACCRETION_FATAL = (
+    "MBHAccretion=1 and BHAccretionMethod>0 are mutually exclusive"
+)
 
 HDF5_EXPECTED_LABELS = (
     "bh_cumul_reservoir_in",
@@ -4051,6 +4054,7 @@ def main(argv=None):
             "D0c-repos R4 actual movement ON/OFF",
             "T8 negative BHFeedbackEddingtonFactor validation",
             "T9 efficiency product > 1.0 validation",
+            "D2-0 config guard MBHAccretion/BHAccretionMethod mutual exclusion",
         ):
             results.append(fail_result(name, f"preflight failed: {reason}"))
         results.append(skip_result(
@@ -4127,6 +4131,20 @@ def main(argv=None):
             "T9 efficiency product > 1.0 validation",
             t9,
             EFFICIENCY_PRODUCT_FATAL,
+        ))
+
+        d2_guard = run_named(
+            "D2_0_config_guard_dual_mbh_bhaccretion",
+            baseline_overrides(
+                MBHAccretion=1,
+                BHAccretionMethod=1,
+            ),
+            remove_keys=("BHFeedbackEddingtonFactor",),
+        )
+        results.append(validate_expected_failure(
+            "D2-0 config guard MBHAccretion/BHAccretionMethod mutual exclusion",
+            d2_guard,
+            DUAL_MBH_BHACCRETION_FATAL,
         ))
 
         t7_continuous, t7_first, t7_second, t7_restart_param = run_t7_restart_cases()
