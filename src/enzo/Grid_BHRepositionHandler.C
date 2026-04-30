@@ -289,6 +289,8 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               -1.0,
               0.0, 0.0,
               0, 0, 1,
+              BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
+              0, 0,
               0, 0, reposition_wall_ms);
       continue;
     }
@@ -562,8 +564,6 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 	            offset_from_potential_kpc,
 	            displacement_kpc, displacement_cells,
 	            reposition_occurred, reposition_clamped, 0,
-	            BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
-	            search_kernel_truncated, active_reposition_rejected,
 	            search_cells, search_active_cells, reposition_wall_ms);
   }
 
