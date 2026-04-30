@@ -175,6 +175,13 @@ D0C_SEED_MPI_POSITION_ATOL = 1e-12
 D0C_REPOS_POSITION_ATOL = 1e-10
 D0C_REPOS_ZERO_ATOL = 1e-12
 D0C_REPOS_COUNTER_MAX_SAFE = 1000000000
+D0C_REPOS_R4_INITIAL_POSITION = (0.15, 0.49, 0.49)
+D0C_REPOS_R4_TARGET_POSITION = (0.19, 0.49, 0.49)
+D0C_REPOS_R4_POSITION_ATOL = 1e-10
+D0C_REPOS_R4_DISPLACEMENT_ATOL = 1e-8
+D0C_REPOS_R4_SEARCH_RADIUS_KPC = 6.0
+D0C_REPOS_R4_BACKGROUND_DENSITY = 1e-6
+D0C_REPOS_R4_TARGET_DENSITY = 1e-3
 
 T10_BHACCR_NUMERIC_FIELDS = (
     ("lambda_edd", ("lambda_edd",)),
@@ -2544,6 +2551,167 @@ def d0c_repos_no_accr_feedback_errors(name, case):
     return errors, bhaccr_lines, bhfdbk_lines
 
 
+def d0c_repos_r4_cell_index(position, dim=50):
+    return int(round(float(position) * dim - 0.5))
+
+
+def d0c_repos_r4_hdf5_edit_code():
+    return r"""
+import json
+import sys
+import h5py
+
+h5path = sys.argv[1]
+initial_pos = [float(value) for value in sys.argv[2].split(",")]
+target_pos = [float(value) for value in sys.argv[3].split(",")]
+background_density = float(sys.argv[4])
+target_density = float(sys.argv[5])
+
+def cell_index(position, dim=50):
+    return int(round(float(position) * dim - 0.5))
+
+with h5py.File(h5path, "r+") as h5f:
+    if "Grid00000001" not in h5f:
+        raise RuntimeError("Grid00000001 missing from copied R4 restart")
+    group = h5f["Grid00000001"]
+    required = [
+        "particle_type", "particle_position_x", "particle_position_y",
+        "particle_position_z", "particle_velocity_x", "particle_velocity_y",
+        "particle_velocity_z", "particle_index", "Density", "GasEnergy",
+        "TotalEnergy", "x-velocity", "y-velocity", "z-velocity",
+    ]
+    missing = [name for name in required if name not in group]
+    if missing:
+        raise RuntimeError("missing R4 restart datasets: " + ",".join(missing))
+    particle_types = group["particle_type"][()]
+    bh_index = None
+    for index, ptype in enumerate(particle_types):
+        if int(abs(float(ptype))) in (6, 8):
+            bh_index = index
+            break
+    if bh_index is None:
+        raise RuntimeError("no type 6/8 BH particle in copied R4 restart")
+
+    group["particle_position_x"][bh_index] = initial_pos[0]
+    group["particle_position_y"][bh_index] = initial_pos[1]
+    group["particle_position_z"][bh_index] = initial_pos[2]
+    group["particle_velocity_x"][bh_index] = 0.0
+    group["particle_velocity_y"][bh_index] = 0.0
+    group["particle_velocity_z"][bh_index] = 0.0
+    group["particle_index"][bh_index] = 1
+
+    group["Density"][...] = background_density
+    group["GasEnergy"][...] = 1.0
+    group["TotalEnergy"][...] = 1.0
+    group["x-velocity"][...] = 0.0
+    group["y-velocity"][...] = 0.0
+    group["z-velocity"][...] = 0.0
+
+    i = cell_index(target_pos[0])
+    j = cell_index(target_pos[1])
+    k = cell_index(target_pos[2])
+    group["Density"][k, j, i] = target_density
+
+    info = {
+        "h5path": h5path,
+        "group": "Grid00000001",
+        "bh_index": int(bh_index),
+        "datasets_edited": required,
+        "initial_position": initial_pos,
+        "target_position": target_pos,
+        "target_cell_ijk": [int(i), int(j), int(k)],
+        "background_density": background_density,
+        "target_density": target_density,
+    }
+print(json.dumps(info))
+"""
+
+
+def d0c_repos_r4_edit_hdf5(h5path):
+    args = [
+        str(h5path),
+        ",".join(str(value) for value in D0C_REPOS_R4_INITIAL_POSITION),
+        ",".join(str(value) for value in D0C_REPOS_R4_TARGET_POSITION),
+        str(D0C_REPOS_R4_BACKGROUND_DENSITY),
+        str(D0C_REPOS_R4_TARGET_DENSITY),
+    ]
+    code = d0c_repos_r4_hdf5_edit_code()
+    helper_pythons = [
+        Path(sys.executable),
+        Path("/home/bkoh/miniconda3/envs/yt-env/bin/python"),
+        DEFAULT_CONDA_BIN / "python",
+    ]
+    failures = []
+    seen = set()
+    for helper in helper_pythons:
+        if helper in seen:
+            continue
+        seen.add(helper)
+        if not helper.exists():
+            continue
+        proc = run_cmd([helper, "-c", code, *args], cwd=ROOT)
+        if proc.returncode == 0:
+            return json.loads(proc.stdout)
+        failures.append(f"{helper}: rc={proc.returncode} {proc.stdout[-400:]}")
+    raise RuntimeError(
+        "h5py unavailable for R4 copied-restart edit in python3 and helper envs; "
+        + " | ".join(failures)
+    )
+
+
+def d0c_repos_r4_prepare_case(name, base_case, method):
+    meta = final_output_metadata(base_case.cdir)
+    if meta is None:
+        raise RuntimeError(f"R4 base case has no final output: {base_case.cdir}")
+    base_param = Path(meta["path"])
+    base_output_dir = base_param.parent
+    cdir = OUT_ROOT / name
+    if cdir.exists():
+        shutil.rmtree(cdir)
+    cdir.mkdir(parents=True, exist_ok=True)
+    copied_output_dir = cdir / base_output_dir.name
+    shutil.copytree(base_output_dir, copied_output_dir)
+    param_path = copied_output_dir / base_param.name
+    text = param_path.read_text()
+    for key, value in {
+            "StopTime": "0.03",
+            "StopCycle": "3",
+            "dtDataDump": "0.01",
+            "CycleSkipDataDump": "0",
+            "BHSeedingMethod": "0",
+            "BHSeedVerbose": "0",
+            "BHAccretionMethod": "0",
+            "BHAccretionRunEveryTimestep": "1",
+            "BHFeedbackMethod": "0",
+            "BHRepositionMethod": str(method),
+            "BHRepositionSearchRadius": f"{D0C_REPOS_R4_SEARCH_RADIUS_KPC:.6g}",
+            "BHRepositionMaxDisplacement": "0.5",
+            "BHRepositionDiagnosePotential": "0",
+            "BHRepositionVerbose": "1",
+            "SelfGravity": "0",
+    }.items():
+        text = set_param(text, key, value)
+    param_path.write_text(text)
+
+    h5path = copied_output_dir / f"{base_param.name}.cpu0000"
+    edit_info = d0c_repos_r4_edit_hdf5(h5path)
+    case = run_enzo(
+        cdir,
+        np_ranks=1,
+        log_name="run.log",
+        param_file=str(param_path.relative_to(cdir)),
+        restart=True,
+    )
+    case.metrics = {
+        "base_output": str(base_output_dir),
+        "copied_output": str(copied_output_dir),
+        "restart_param": str(param_path),
+        "hdf5_edit": edit_info,
+        "method": method,
+    }
+    return case
+
+
 def validate_d0c_repos_r0(case):
     name = "D0c-repos R0 newly seeded skip diagnostic"
     run_error = validate_case_completed(name, case)
@@ -2893,6 +3061,166 @@ def run_d0c_repos_r3(np1_case):
     )
     np4_case = run_enzo(np4_dir, np_ranks=4, mpirun=mpirun_path)
     return validate_d0c_repos_r3(np1_case, np4_case, mpirun_path)
+
+
+def d0c_repos_r4_representative_row(case):
+    rows = [
+        row for row in d0c_repos_regular_rows(case.log)
+        if row.get("bh_id") == 1
+    ]
+    if rows:
+        return rows[0]
+    rows = d0c_repos_regular_rows(case.log)
+    return rows[0] if rows else {}
+
+
+def d0c_repos_r4_expect_target(errors, name, row):
+    d0c_repos_expect_equal(errors, name, row, "active_target_exists", 1)
+    for axis, expected in zip(("x", "y", "z"), D0C_REPOS_R4_TARGET_POSITION):
+        d0c_repos_expect_close(
+            errors,
+            name,
+            row,
+            f"active_peak_pos_{axis}",
+            expected,
+            abs_tol=D0C_REPOS_R4_POSITION_ATOL,
+        )
+
+
+def validate_d0c_repos_r4(method0_case, method2_case):
+    name = "D0c-repos R4 actual movement ON/OFF"
+    errors = []
+    metrics = {
+        "run_dirs": {
+            "method0": str(method0_case.cdir),
+            "method2": str(method2_case.cdir),
+        },
+        "case_setup": {
+            "initial_position": D0C_REPOS_R4_INITIAL_POSITION,
+            "target_position": D0C_REPOS_R4_TARGET_POSITION,
+            "search_radius_kpc": D0C_REPOS_R4_SEARCH_RADIUS_KPC,
+            "background_density": D0C_REPOS_R4_BACKGROUND_DENSITY,
+            "target_density": D0C_REPOS_R4_TARGET_DENSITY,
+            "method0": getattr(method0_case, "metrics", {}),
+            "method2": getattr(method2_case, "metrics", {}),
+        },
+    }
+    for label, case in (("method0", method0_case), ("method2", method2_case)):
+        run_error = validate_case_completed(f"{name} {label}", case)
+        if run_error:
+            errors.append(run_error)
+        no_source_errors, bhaccr_lines, bhfdbk_lines = d0c_repos_no_accr_feedback_errors(
+            f"{name} {label}", case)
+        errors.extend(no_source_errors)
+        metrics.setdefault("diagnostic_counts", {})[label] = {
+            "bhaccr_lines": len(bhaccr_lines),
+            "bhfdbk_lines": len(bhfdbk_lines),
+        }
+
+    row0 = d0c_repos_r4_representative_row(method0_case)
+    row2 = d0c_repos_r4_representative_row(method2_case)
+    if not row0:
+        errors.append(d0c_repos_failure(
+            name, "method0 has at least one regular [BHREPOS] row", 0))
+    if not row2:
+        errors.append(d0c_repos_failure(
+            name, "method2 has at least one regular [BHREPOS] row", 0))
+
+    if row0:
+        d0c_repos_r4_expect_target(errors, f"{name} method0", row0)
+        d0c_repos_expect_equal(errors, f"{name} method0", row0, "reposition_occurred", 0)
+        d0c_repos_expect_close(errors, f"{name} method0", row0, "displacement_cells", 0.0)
+        d0c_repos_expect_close(errors, f"{name} method0", row0, "displacement_kpc", 0.0)
+        d0c_repos_validate_boolean_counter_safety(errors, f"{name} method0", row0)
+    if row2:
+        d0c_repos_r4_expect_target(errors, f"{name} method2", row2)
+        for field in ("search_kernel_truncated", "active_reposition_rejected"):
+            if field in row2:
+                d0c_repos_expect_equal(errors, f"{name} method2", row2, field, 0)
+        d0c_repos_expect_equal(errors, f"{name} method2", row2, "reposition_occurred", 1)
+        d0c_repos_expect_equal(errors, f"{name} method2", row2, "reposition_clamped", 0)
+        d0c_repos_expect_close(
+            errors, f"{name} method2", row2, "displacement_cells", 2.0,
+            abs_tol=D0C_REPOS_R4_DISPLACEMENT_ATOL,
+        )
+        d0c_repos_expect_close(
+            errors, f"{name} method2", row2, "displacement_kpc", 4.0,
+            abs_tol=D0C_REPOS_R4_DISPLACEMENT_ATOL,
+        )
+        d0c_repos_validate_boolean_counter_safety(errors, f"{name} method2", row2)
+
+    particle0, records0, meta0, final0 = d0c_repos_final_particle(
+        f"{name} method0", method0_case, errors)
+    particle2, records2, meta2, final2 = d0c_repos_final_particle(
+        f"{name} method2", method2_case, errors)
+    d0c_repos_expect_position_close(
+        errors,
+        f"{name} method0",
+        final0,
+        D0C_REPOS_R4_INITIAL_POSITION,
+        "method0 final BH position",
+        abs_tol=D0C_REPOS_R4_POSITION_ATOL,
+    )
+    d0c_repos_expect_position_close(
+        errors,
+        f"{name} method2",
+        final2,
+        D0C_REPOS_R4_TARGET_POSITION,
+        "method2 final BH position",
+        abs_tol=D0C_REPOS_R4_POSITION_ATOL,
+    )
+    if row2:
+        logged_target = tuple(float(row2.get(f"active_peak_pos_{axis}"))
+                              for axis in ("x", "y", "z"))
+        d0c_repos_expect_position_close(
+            errors,
+            f"{name} method2",
+            final2,
+            logged_target,
+            "method2 final BH position vs logged active peak",
+            abs_tol=D0C_REPOS_R4_POSITION_ATOL,
+        )
+
+    metrics.update({
+        "representative_bhrepos": {"method0": row0, "method2": row2},
+        "initial_position": D0C_REPOS_R4_INITIAL_POSITION,
+        "final_positions": {"method0": final0, "method2": final2},
+        "bh_particles": {
+            "method0": [d0c_seed_particle_summary(record) for record in records0],
+            "method2": [d0c_seed_particle_summary(record) for record in records2],
+        },
+        "final_outputs": {"method0": meta0, "method2": meta2},
+    })
+    if errors:
+        detail = errors[0]
+        if row0 or row2:
+            detail += (
+                f"; method0_row={row0}; method2_row={row2}; "
+                f"initial={D0C_REPOS_R4_INITIAL_POSITION}; "
+                f"final0={final0}; final2={final2}"
+            )
+        return fail_result(name, detail, {"errors": errors[:10], **metrics},
+                           str(method2_case.log))
+    return pass_result(
+        name,
+        "method0 saw the target without moving; method2 moved to the logged active target",
+        metrics,
+        str(method2_case.log),
+    )
+
+
+def run_d0c_repos_r4(base_case):
+    method0_case = d0c_repos_r4_prepare_case(
+        "D0c_repos_R4A_method0_no_movement",
+        base_case,
+        method=0,
+    )
+    method2_case = d0c_repos_r4_prepare_case(
+        "D0c_repos_R4B_method2_actual_movement",
+        base_case,
+        method=2,
+    )
+    return validate_d0c_repos_r4(method0_case, method2_case)
 
 
 def unique_id_map(records):
@@ -3720,6 +4048,7 @@ def main(argv=None):
             "D0c-repos R0 newly seeded skip diagnostic",
             "D0c-repos R1 method0 diagnostic no movement",
             "D0c-repos R2 method2 safety rejection",
+            "D0c-repos R4 actual movement ON/OFF",
             "T8 negative BHFeedbackEddingtonFactor validation",
             "T9 efficiency product > 1.0 validation",
         ):
@@ -3889,6 +4218,11 @@ def main(argv=None):
         )
         results.append(validate_d0c_repos_r2(repos_r2))
         results.append(run_d0c_repos_r3(repos_r0_r1))
+        # R4 uses a scratch-only copied mini-restart derived from the R0/R1
+        # TS3 output. The HDF5 edits place a non-new BH in the interior and
+        # inject one offset dense cell so method 0 can see a target without
+        # moving while method 2 moves to the logged active peak.
+        results.append(run_d0c_repos_r4(repos_r0_r1))
 
     results.append(run_optional_phaseb_lite(include_phaseb))
     results.append(validate_h1(start_snapshot))
