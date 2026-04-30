@@ -164,6 +164,14 @@ T7_EVOLVED_BH_FLOAT_FIELDS = {
 }
 
 BH_PARTICLE_TYPES = {6, 8}
+D0C_SEED_EXPECTED_PARTICLE_TYPE = 8
+D0C_SEED_EXPECTED_MASS = 4.054e-14
+D0C_SEED_MASS_RTOL = 1e-3
+D0C_SEED_EXPECTED_POSITION = (0.01, 0.49, 0.49)
+D0C_SEED_POSITION_ATOL = 1e-6
+D0C_SEED_DETERMINISTIC_POSITION_ATOL = 1e-15
+D0C_SEED_DETERMINISTIC_MASS_ATOL = 1e-20
+D0C_SEED_MPI_POSITION_ATOL = 1e-12
 
 T10_BHACCR_NUMERIC_FIELDS = (
     ("lambda_edd", ("lambda_edd",)),
@@ -377,6 +385,18 @@ def d0c_acc_base_overrides(**overrides):
     return params
 
 
+def d0c_seed_opt_in_overrides(**overrides):
+    params = {
+        "BHSeedingMethod": 1,
+        "BHSeedRunEveryTimestep": 1,
+        "BHSeedVerbose": 1,
+        "BHAccretionMethod": 0,
+        "BHFeedbackMethod": 0,
+    }
+    params.update(overrides)
+    return params
+
+
 def prepare_case(name, overrides=None, remove_keys=()):
     overrides = overrides or {}
     cdir = OUT_ROOT / name
@@ -388,20 +408,24 @@ def prepare_case(name, overrides=None, remove_keys=()):
     return cdir
 
 
-def enzo_command(param_file="case.enzo", np_ranks=1, restart=False):
-    cmd = [MPIRUN, "-n", str(np_ranks), str(ENZO_EXE), "-d"]
+def enzo_command(param_file="case.enzo", np_ranks=1, restart=False, mpirun=None):
+    launcher = mpirun or MPIRUN
+    cmd = [launcher, "-n", str(np_ranks), str(ENZO_EXE), "-d"]
     if restart:
         cmd.append("-r")
     cmd.append(str(param_file))
     return cmd
 
 
-def run_enzo(cdir, np_ranks=1, log_name="run.log", param_file="case.enzo", restart=False):
+def run_enzo(
+        cdir, np_ranks=1, log_name="run.log", param_file="case.enzo",
+        restart=False, mpirun=None):
     env = os.environ.copy()
     env["HDF5_DISABLE_VERSION_CHECK"] = "2"
     if DEFAULT_CONDA_BIN.exists():
         env["PATH"] = f"{DEFAULT_CONDA_BIN}:{env.get('PATH', '')}"
-    cmd = enzo_command(param_file=param_file, np_ranks=np_ranks, restart=restart)
+    cmd = enzo_command(
+        param_file=param_file, np_ranks=np_ranks, restart=restart, mpirun=mpirun)
     log_path = cdir / log_name
     with open(log_path, "w") as log:
         try:
@@ -1127,8 +1151,30 @@ def validate_d0b_f3(case, f1_result):
     )
 
 
-def seed_created_total(log):
-    seed_rows = rows_for(log, "[BHSEED]", min_step=0)
+def bhseed_rows(log, min_step=0):
+    return rows_for(log, "[BHSEED]", min_step=min_step)
+
+
+def bhseed_seed_rows(log, min_step=0):
+    seed_rows = []
+    for line in lines(log, "[BHSEED_SEED]"):
+        row = parse_kv(line)
+        step = row.get("step")
+        if isinstance(step, int) and step < min_step:
+            continue
+        seed_rows.append(row)
+    return seed_rows
+
+
+def diagnostic_lines(log, tag, warn_tag=None):
+    return [
+        line for line in lines(log, tag)
+        if not warn_tag or warn_tag not in line
+    ]
+
+
+def seed_created_total(log, min_step=0):
+    seed_rows = bhseed_rows(log, min_step=min_step)
     if not seed_rows:
         return None
     total = 0
@@ -1212,7 +1258,7 @@ def validate_d0c_a1(case):
         return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
 
     errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
-    seed_total = seed_created_total(case.log)
+    seed_total = seed_created_total(case.log, min_step=0)
     if seed_total is not None and seed_total != 1:
         errors.append(f"seed_created_total={seed_total} expected 1")
     if not errors:
@@ -1297,7 +1343,7 @@ def validate_d0c_a2(case):
         return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
 
     errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
-    seed_total = seed_created_total(case.log)
+    seed_total = seed_created_total(case.log, min_step=0)
     if seed_total is not None and seed_total != 1:
         errors.append(f"seed_created_total={seed_total} expected 1")
     if not errors:
@@ -1360,7 +1406,7 @@ def validate_d0c_a5(case):
         return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
 
     errors = required_field_errors(row, D0C_ACC_REQUIRED_FIELDS)
-    seed_total = seed_created_total(case.log)
+    seed_total = seed_created_total(case.log, min_step=0)
     if seed_total is not None and seed_total != 1:
         errors.append(f"seed_created_total={seed_total} expected 1")
     if not errors:
@@ -1483,9 +1529,11 @@ def output_parameter_files(cdir, prefix="DD"):
     for child in (sorted(cdir.iterdir()) if cdir.exists() else []):
         if not child.is_dir() or not child.name.startswith(prefix):
             continue
-        param = child / child.name
-        if param.is_file():
-            candidates.append(param)
+        for param in (child / child.name, *sorted(child.glob("data[0-9]*"))):
+            if not param.is_file():
+                continue
+            if param.name == child.name or re.fullmatch(r"data\d+", param.name):
+                candidates.append(param)
     return candidates
 
 
@@ -1725,9 +1773,9 @@ def collect_bh_particle_records(param_path):
         import h5py
     except ImportError as err:
         helper_records, helper_errors = collect_bh_particle_records_with_helper(files)
-        if helper_records or helper_errors:
-            return helper_records, helper_errors
-        return [], [f"h5py unavailable for T7 particle comparison: {err}"]
+        if helper_errors == ["h5py unavailable for T7 particle comparison in python3 and helper envs"]:
+            return [], [f"h5py unavailable for T7 particle comparison: {err}"]
+        return helper_records, helper_errors
     records = []
     errors = []
     for path in files:
@@ -1748,6 +1796,560 @@ def collect_bh_particle_records(param_path):
         except Exception as err:
             errors.append(f"{path}: {err}")
     return records, errors
+
+
+def d0c_seed_failure(name, expected, actual, row=None, line=None):
+    raw = line if line is not None else (row.get("__line", "") if row else "")
+    parts = [f"{name}: expected {expected}; actual {actual}"]
+    if raw:
+        parts.append(f"raw={raw}")
+    if row is not None:
+        parts.append(f"parsed={row}")
+    return "; ".join(parts)
+
+
+def d0c_seed_expect_equal(errors, name, row, field, expected):
+    actual = row.get(field, "<missing>")
+    if actual != expected:
+        errors.append(d0c_seed_failure(
+            name, f"{field} == {expected!r}", actual, row=row))
+
+
+def d0c_seed_expect_at_least(errors, name, row, field, expected):
+    actual = row.get(field, "<missing>")
+    if not is_finite_number(actual) or float(actual) < float(expected):
+        errors.append(d0c_seed_failure(
+            name, f"{field} >= {expected!r}", actual, row=row))
+
+
+def d0c_seed_expect_close(
+        errors, name, row, field, expected, rel_tol=0.0, abs_tol=0.0):
+    actual = row.get(field, "<missing>")
+    if not is_finite_number(actual) or not math.isclose(
+            float(actual), float(expected), rel_tol=rel_tol, abs_tol=abs_tol):
+        errors.append(d0c_seed_failure(
+            name,
+            f"{field} ~= {expected!r} rel_tol={rel_tol} abs_tol={abs_tol}",
+            actual,
+            row=row,
+        ))
+
+
+def d0c_seed_particle_summary(record):
+    return {
+        key: record.get(key)
+        for key in (
+            "ParticleID", "ParticleType", "ParticleMass", "ParticlePosition",
+            "__file", "__group",
+        )
+        if key in record
+    }
+
+
+def d0c_seed_is_bh_particle(record):
+    try:
+        return int(abs(float(record.get("ParticleType")))) in BH_PARTICLE_TYPES
+    except (TypeError, ValueError):
+        return False
+
+
+def d0c_seed_final_bh_particles(case):
+    meta = final_output_metadata(case.cdir)
+    if meta is None:
+        return [], [f"missing final DD output metadata under {case.cdir}"], None
+    records, errors = collect_bh_particle_records(meta["path"])
+    bh_records = [record for record in records if d0c_seed_is_bh_particle(record)]
+    return bh_records, errors, meta
+
+
+def d0c_seed_single_particle(name, case):
+    records, h5_errors, meta = d0c_seed_final_bh_particles(case)
+    errors = []
+    if h5_errors:
+        errors.append(d0c_seed_failure(
+            name, "readable HDF5 BH particle records", h5_errors))
+    if len(records) != 1:
+        errors.append(d0c_seed_failure(
+            name,
+            "exactly one HDF5 BH particle with ParticleType 6 or 8",
+            {
+                "count": len(records),
+                "records": [d0c_seed_particle_summary(record) for record in records[:4]],
+            },
+        ))
+    record = records[0] if len(records) == 1 else None
+    return record, records, meta, errors
+
+
+def d0c_seed_particle_position(record):
+    position = record.get("ParticlePosition")
+    if not isinstance(position, (tuple, list)) or len(position) != 3:
+        return None
+    return tuple(float(value) for value in position)
+
+
+def d0c_seed_validate_particle_type_mass(
+        errors, name, record, expected_mass=None, mass_abs_tol=None):
+    ptype = record.get("ParticleType", "<missing>")
+    try:
+        actual_type = int(abs(float(ptype)))
+    except (TypeError, ValueError):
+        actual_type = ptype
+    if actual_type != D0C_SEED_EXPECTED_PARTICLE_TYPE:
+        errors.append(d0c_seed_failure(
+            name,
+            f"ParticleType == {D0C_SEED_EXPECTED_PARTICLE_TYPE}",
+            ptype,
+        ))
+    mass = record.get("ParticleMass")
+    if expected_mass is None:
+        expected_mass = D0C_SEED_EXPECTED_MASS
+        close = (
+            is_finite_number(mass) and
+            math.isclose(float(mass), expected_mass, rel_tol=D0C_SEED_MASS_RTOL)
+        )
+        expected = (
+            f"ParticleMass ~= {expected_mass:.8e} "
+            f"rel_tol={D0C_SEED_MASS_RTOL}"
+        )
+    else:
+        close = (
+            is_finite_number(mass) and
+            math.isclose(
+                float(mass), float(expected_mass),
+                rel_tol=0.0, abs_tol=mass_abs_tol or 0.0,
+            )
+        )
+        expected = (
+            f"ParticleMass matches S1 {float(expected_mass):.17e} "
+            f"abs_tol={mass_abs_tol}"
+        )
+    if not close:
+        errors.append(d0c_seed_failure(name, expected, mass))
+
+
+def validate_d0c_seed_s0(case):
+    name = "D0c-seed S0 default-off no-seed"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    seed_lines = lines(case.log, "[BHSEED]")
+    seed_seed_lines = lines(case.log, "[BHSEED_SEED]")
+    bhaccr_lines = diagnostic_lines(case.log, "[BHACCR]", warn_tag="[BHACCR_WARN]")
+    bhfdbk_lines = diagnostic_lines(case.log, "[BHFDBK]", warn_tag="[BHFDBK_WARN]")
+    if seed_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero [BHSEED] lines", len(seed_lines), line=seed_lines[0]))
+    if seed_seed_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero [BHSEED_SEED] lines", len(seed_seed_lines),
+            line=seed_seed_lines[0],
+        ))
+    if bhaccr_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero non-WARN [BHACCR] lines", len(bhaccr_lines),
+            line=bhaccr_lines[0],
+        ))
+    if bhfdbk_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero non-WARN [BHFDBK] lines", len(bhfdbk_lines),
+            line=bhfdbk_lines[0],
+        ))
+    bh_records, h5_errors, meta = d0c_seed_final_bh_particles(case)
+    if h5_errors:
+        errors.append(d0c_seed_failure(
+            name, "readable final HDF5 particle inventory", h5_errors))
+    if bh_records:
+        errors.append(d0c_seed_failure(
+            name,
+            "zero HDF5 BH particles with ParticleType 6 or 8",
+            {
+                "count": len(bh_records),
+                "records": [d0c_seed_particle_summary(record)
+                            for record in bh_records[:4]],
+            },
+        ))
+    metrics = {
+        "run_dir": str(case.cdir),
+        "seed_lines": len(seed_lines),
+        "seed_seed_lines": len(seed_seed_lines),
+        "bhaccr_lines": len(bhaccr_lines),
+        "bhfdbk_lines": len(bhfdbk_lines),
+        "hdf5_bh_particles": len(bh_records),
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "default-off produced no seed/accretion/feedback diagnostics and no HDF5 BHs",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_seed_s1(case):
+    name = "D0c-seed S1 explicit opt-in seed creation"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    seed_total = seed_created_total(case.log, min_step=0)
+    seed_rows = bhseed_seed_rows(case.log, min_step=0)
+    if seed_total != 1:
+        errors.append(d0c_seed_failure(
+            name, "seed_created_total(log, min_step=0) == 1", seed_total))
+    if len(seed_rows) != 1:
+        raw = lines(case.log, "[BHSEED_SEED]")
+        errors.append(d0c_seed_failure(
+            name, "exactly one [BHSEED_SEED] line", len(seed_rows),
+            line=raw[0] if raw else "",
+        ))
+    seed_row = seed_rows[0] if len(seed_rows) == 1 else {}
+    if seed_row:
+        for field, expected in zip(("x", "y", "z"), D0C_SEED_EXPECTED_POSITION):
+            d0c_seed_expect_close(
+                errors, name, seed_row, field, expected,
+                abs_tol=D0C_SEED_POSITION_ATOL,
+            )
+        d0c_seed_expect_equal(errors, name, seed_row, "channel", 0)
+        d0c_seed_expect_equal(errors, name, seed_row, "accept_rank", 1)
+
+    summary_rows = bhseed_rows(case.log, min_step=1)
+    if not summary_rows:
+        errors.append(d0c_seed_failure(
+            name, "at least one [BHSEED] row with min_step=1",
+            len(summary_rows),
+        ))
+        first_summary = {}
+    else:
+        first_summary = summary_rows[0]
+        for field, expected in (
+                ("ncand_global", 2),
+                ("created", 1),
+                ("nseeds_created", 1),
+                ("total_mbh", 1),
+                ("ncandidates_gathered", 2),
+                ("ncandidates_dedup_rejected", 1),
+        ):
+            d0c_seed_expect_equal(errors, name, first_summary, field, expected)
+
+    bhaccr_lines = diagnostic_lines(case.log, "[BHACCR]", warn_tag="[BHACCR_WARN]")
+    bhfdbk_lines = diagnostic_lines(case.log, "[BHFDBK]", warn_tag="[BHFDBK_WARN]")
+    if bhaccr_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero non-WARN [BHACCR] rows", len(bhaccr_lines),
+            line=bhaccr_lines[0],
+        ))
+    if bhfdbk_lines:
+        errors.append(d0c_seed_failure(
+            name, "zero non-WARN [BHFDBK] rows", len(bhfdbk_lines),
+            line=bhfdbk_lines[0],
+        ))
+
+    particle, bh_records, meta, particle_errors = d0c_seed_single_particle(name, case)
+    errors.extend(particle_errors)
+    if particle is not None:
+        d0c_seed_validate_particle_type_mass(errors, name, particle)
+
+    metrics = {
+        "run_dir": str(case.cdir),
+        "seed_created_total": seed_total,
+        "seed_row": seed_row,
+        "first_bhseed_row": first_summary,
+        "bhaccr_lines": len(bhaccr_lines),
+        "bhfdbk_lines": len(bhfdbk_lines),
+        "hdf5_bh_particles": len(bh_records),
+        "bh_particles": [d0c_seed_particle_summary(record) for record in bh_records],
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"seed_created_total=1; seed=({seed_row.get('x')},"
+        f"{seed_row.get('y')},{seed_row.get('z')}); "
+        f"ParticleMass={particle.get('ParticleMass'):.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_seed_s2(case):
+    name = "D0c-seed S2 temperature gate no-seed"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    errors = []
+    # This is the one controlled negative gate used in D0c-seed1.
+    summary_rows = bhseed_rows(case.log, min_step=0)
+    if not summary_rows:
+        errors.append(d0c_seed_failure(
+            name,
+            "at least one [BHSEED] row with min_step=0 confirming handler ran",
+            len(summary_rows),
+        ))
+    for row in summary_rows:
+        d0c_seed_expect_at_least(errors, name, row, "ngates_temp", 2)
+        for field in ("created", "nseeds_created", "total_mbh"):
+            d0c_seed_expect_equal(errors, name, row, field, 0)
+
+    seed_rows = bhseed_seed_rows(case.log, min_step=0)
+    if seed_rows:
+        errors.append(d0c_seed_failure(
+            name, "zero [BHSEED_SEED] lines", len(seed_rows), row=seed_rows[0]))
+    bh_records, h5_errors, meta = d0c_seed_final_bh_particles(case)
+    if h5_errors:
+        errors.append(d0c_seed_failure(
+            name, "readable final HDF5 particle inventory", h5_errors))
+    if bh_records:
+        errors.append(d0c_seed_failure(
+            name,
+            "zero HDF5 BH particles with ParticleType 6 or 8",
+            {
+                "count": len(bh_records),
+                "records": [d0c_seed_particle_summary(record)
+                            for record in bh_records[:4]],
+            },
+        ))
+    representative = summary_rows[0] if summary_rows else {}
+    metrics = {
+        "run_dir": str(case.cdir),
+        "bhseed_rows": len(summary_rows),
+        "representative_bhseed_row": representative,
+        "seed_seed_lines": len(seed_rows),
+        "hdf5_bh_particles": len(bh_records),
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"temperature gate rejected candidates; ngates_temp={representative.get('ngates_temp')}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d0c_seed_s3(case_a, case_b):
+    name = "D0c-seed S3 deterministic np1 repeat"
+    errors = []
+    for label, case in (("repeat_a", case_a), ("repeat_b", case_b)):
+        run_error = validate_case_completed(name, case)
+        if run_error:
+            errors.append(f"{name} {label}: {run_error}")
+    total_a = seed_created_total(case_a.log, min_step=0) if case_a.rc == 0 else None
+    total_b = seed_created_total(case_b.log, min_step=0) if case_b.rc == 0 else None
+    if total_a != 1:
+        errors.append(d0c_seed_failure(
+            name, "repeat_a seed_created_total(log, min_step=0) == 1", total_a))
+    if total_b != 1:
+        errors.append(d0c_seed_failure(
+            name, "repeat_b seed_created_total(log, min_step=0) == 1", total_b))
+
+    seed_a = bhseed_seed_rows(case_a.log, min_step=0)
+    seed_b = bhseed_seed_rows(case_b.log, min_step=0)
+    if len(seed_a) != 1:
+        errors.append(d0c_seed_failure(
+            name, "repeat_a exactly one [BHSEED_SEED] line", len(seed_a),
+            line=lines(case_a.log, "[BHSEED_SEED]")[0] if lines(case_a.log, "[BHSEED_SEED]") else "",
+        ))
+    if len(seed_b) != 1:
+        errors.append(d0c_seed_failure(
+            name, "repeat_b exactly one [BHSEED_SEED] line", len(seed_b),
+            line=lines(case_b.log, "[BHSEED_SEED]")[0] if lines(case_b.log, "[BHSEED_SEED]") else "",
+        ))
+    compared_fields = ("x", "y", "z", "channel", "patch_density_peak", "accept_rank")
+    if len(seed_a) == 1 and len(seed_b) == 1:
+        for field in compared_fields:
+            if seed_a[0].get(field) != seed_b[0].get(field):
+                errors.append(d0c_seed_failure(
+                    name,
+                    f"repeat [BHSEED_SEED] field {field} exactly matches",
+                    {"repeat_a": seed_a[0].get(field), "repeat_b": seed_b[0].get(field)},
+                    row=seed_a[0],
+                ))
+
+    particle_a, records_a, meta_a, particle_errors_a = d0c_seed_single_particle(name, case_a)
+    particle_b, records_b, meta_b, particle_errors_b = d0c_seed_single_particle(name, case_b)
+    errors.extend(f"repeat_a {err}" for err in particle_errors_a)
+    errors.extend(f"repeat_b {err}" for err in particle_errors_b)
+    hdf5_comparison = {}
+    if particle_a is not None and particle_b is not None:
+        mass_a = particle_a.get("ParticleMass")
+        mass_b = particle_b.get("ParticleMass")
+        if not (
+                is_finite_number(mass_a) and is_finite_number(mass_b) and
+                math.isclose(
+                    float(mass_a), float(mass_b), rel_tol=0.0,
+                    abs_tol=D0C_SEED_DETERMINISTIC_MASS_ATOL,
+                )):
+            errors.append(d0c_seed_failure(
+                name,
+                "repeat HDF5 ParticleMass matches within deterministic tolerance",
+                {"repeat_a": mass_a, "repeat_b": mass_b},
+            ))
+        pos_a = d0c_seed_particle_position(particle_a)
+        pos_b = d0c_seed_particle_position(particle_b)
+        if pos_a is None or pos_b is None:
+            errors.append(d0c_seed_failure(
+                name,
+                "repeat HDF5 ParticlePosition readable on both particles",
+                {"repeat_a": pos_a, "repeat_b": pos_b},
+            ))
+        else:
+            for dim, (left, right) in enumerate(zip(pos_a, pos_b)):
+                if not math.isclose(
+                        left, right, rel_tol=0.0,
+                        abs_tol=D0C_SEED_DETERMINISTIC_POSITION_ATOL):
+                    errors.append(d0c_seed_failure(
+                        name,
+                        f"repeat HDF5 ParticlePosition[{dim}] matches within "
+                        f"{D0C_SEED_DETERMINISTIC_POSITION_ATOL}",
+                        {"repeat_a": left, "repeat_b": right},
+                    ))
+        hdf5_comparison = {
+            "mass_a": mass_a,
+            "mass_b": mass_b,
+            "position_a": pos_a,
+            "position_b": pos_b,
+            "mass_abs_tol": D0C_SEED_DETERMINISTIC_MASS_ATOL,
+            "position_abs_tol": D0C_SEED_DETERMINISTIC_POSITION_ATOL,
+        }
+
+    metrics = {
+        "run_dirs": [str(case_a.cdir), str(case_b.cdir)],
+        "seed_created_total_a": total_a,
+        "seed_created_total_b": total_b,
+        "seed_rows": {
+            "repeat_a": seed_a[0] if seed_a else {},
+            "repeat_b": seed_b[0] if seed_b else {},
+        },
+        "compared_fields": compared_fields,
+        "hdf5_bh_particles": [len(records_a), len(records_b)],
+        "hdf5_comparison": hdf5_comparison,
+        "final_outputs": [meta_a, meta_b],
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case_b.log))
+    return pass_result(
+        name,
+        "np=1 repeat matched seed diagnostics and HDF5 mass/position",
+        metrics,
+        str(case_b.log),
+    )
+
+
+def validate_d0c_seed_s4(case, reference_particle, mpirun_path):
+    name = "D0c-seed S4 optional MPI seed consistency"
+    if case.timed_out or case.rc != 0:
+        reason = (
+            f"np=4 mpirun launch did not complete cleanly rc={case.rc} "
+            f"timed_out={case.timed_out}"
+        )
+        if case.timed_out or mpi_environment_failure(case.log):
+            return skip_result(
+                name,
+                reason,
+                {
+                    "run_dir": str(case.cdir),
+                    "mpirun": mpirun_path,
+                    "log": str(case.log),
+                },
+                str(case.log),
+            )
+        return fail_result(name, reason, {"mpirun": mpirun_path}, str(case.log))
+
+    errors = []
+    seed_total = seed_created_total(case.log, min_step=0)
+    if seed_total != 1:
+        errors.append(d0c_seed_failure(
+            name, "seed_created_total(log, min_step=0) == 1", seed_total))
+    summary_rows = bhseed_rows(case.log, min_step=1)
+    if not summary_rows:
+        errors.append(d0c_seed_failure(
+            name, "at least one [BHSEED] row with min_step=1", len(summary_rows)))
+        first_summary = {}
+    else:
+        first_summary = summary_rows[0]
+        d0c_seed_expect_equal(errors, name, first_summary, "ncand_global", 2)
+
+    particle, records, meta, particle_errors = d0c_seed_single_particle(name, case)
+    errors.extend(particle_errors)
+    ref_mass = reference_particle.get("ParticleMass")
+    ref_pos = d0c_seed_particle_position(reference_particle)
+    position_comparison = {}
+    if particle is not None:
+        d0c_seed_validate_particle_type_mass(
+            errors,
+            name,
+            particle,
+            expected_mass=ref_mass,
+            mass_abs_tol=D0C_SEED_DETERMINISTIC_MASS_ATOL,
+        )
+        pos = d0c_seed_particle_position(particle)
+        if pos is None or ref_pos is None:
+            errors.append(d0c_seed_failure(
+                name,
+                "np=4 and S1 HDF5 ParticlePosition are readable",
+                {"np4": pos, "s1": ref_pos},
+            ))
+        else:
+            for dim, (actual, expected) in enumerate(zip(pos, ref_pos)):
+                if not math.isclose(
+                        actual, expected, rel_tol=0.0,
+                        abs_tol=D0C_SEED_MPI_POSITION_ATOL):
+                    errors.append(d0c_seed_failure(
+                        name,
+                        f"np=4 HDF5 ParticlePosition[{dim}] matches S1 "
+                        f"within {D0C_SEED_MPI_POSITION_ATOL}",
+                        {"np4": actual, "s1": expected},
+                    ))
+            position_comparison = {"np4": pos, "s1": ref_pos}
+
+    metrics = {
+        "run_dir": str(case.cdir),
+        "mpirun": mpirun_path,
+        "seed_created_total": seed_total,
+        "first_bhseed_row": first_summary,
+        "hdf5_bh_particles": len(records),
+        "bh_particles": [d0c_seed_particle_summary(record) for record in records],
+        "reference_particle": d0c_seed_particle_summary(reference_particle),
+        "position_comparison": position_comparison,
+        "final_output": meta,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "np=4 seed count/type/mass/position matched S1 within D0c-seed tolerances",
+        metrics,
+        str(case.log),
+    )
+
+
+def run_d0c_seed_s4(s1_result):
+    name = "D0c-seed S4 optional MPI seed consistency"
+    mpirun_path = str(DEFAULT_MPIRUN)
+    if not executable_available(mpirun_path):
+        return skip_result(name, f"mpirun unavailable: {mpirun_path}", {"mpirun": mpirun_path})
+    reference_particles = s1_result.metrics.get("bh_particles", [])
+    if s1_result.status != "PASS" or len(reference_particles) != 1:
+        return skip_result(
+            name,
+            "S1 reference particle unavailable; optional S4 not attempted",
+            {"s1_status": s1_result.status, "s1_particle_count": len(reference_particles)},
+        )
+    s4_dir = prepare_case(
+        "D0c_seed_S4_optional_mpi_np4_seed_consistency",
+        d0c_seed_opt_in_overrides(),
+    )
+    s4 = run_enzo(s4_dir, np_ranks=4, mpirun=mpirun_path)
+    return validate_d0c_seed_s4(s4, reference_particles[0], mpirun_path)
 
 
 def unique_id_map(records):
@@ -2568,10 +3170,18 @@ def main(argv=None):
             "D0c-acc A2 Eddington cap activation",
             "D0c-acc A5 gas-limited mismatch",
             "D0c-acc F6 mismatch metric",
+            "D0c-seed S0 default-off no-seed",
+            "D0c-seed S1 explicit opt-in seed creation",
+            "D0c-seed S2 temperature gate no-seed",
+            "D0c-seed S3 deterministic np1 repeat",
             "T8 negative BHFeedbackEddingtonFactor validation",
             "T9 efficiency product > 1.0 validation",
         ):
             results.append(fail_result(name, f"preflight failed: {reason}"))
+        results.append(skip_result(
+            "D0c-seed S4 optional MPI seed consistency",
+            f"preflight unavailable: {reason}",
+        ))
     else:
         t1 = run_named(
             "T1_default_phaseC_smoke",
@@ -2676,6 +3286,45 @@ def main(argv=None):
         )
         results.append(validate_d0c_a5(a5))
         results.append(validate_d0c_f6(a5))
+
+        # The TS3_wrap initializer does not plant overdense candidate cells when
+        # BHSeedingMethod is absent/default-off, so this validates the
+        # master-switch early-exit path.
+        s0 = run_named(
+            "D0c_seed_S0_default_off_no_seed",
+            {
+                "BHAccretionMethod": 0,
+                "BHFeedbackMethod": 0,
+            },
+            remove_keys=("BHSeedingMethod",),
+        )
+        results.append(validate_d0c_seed_s0(s0))
+
+        s1 = run_named(
+            "D0c_seed_S1_explicit_opt_in_seed_creation",
+            d0c_seed_opt_in_overrides(),
+        )
+        s1_result = validate_d0c_seed_s1(s1)
+        results.append(s1_result)
+
+        s2 = run_named(
+            "D0c_seed_S2_temperature_gate_no_seed",
+            d0c_seed_opt_in_overrides(BHSeedTemperatureThreshold="100.0"),
+        )
+        results.append(validate_d0c_seed_s2(s2))
+
+        # This is a fixture-level determinism check, not a production-level
+        # stochastic/AMR/MPI determinism proof.
+        s3_a = run_named(
+            "D0c_seed_S3_deterministic_np1_repeat_a",
+            d0c_seed_opt_in_overrides(),
+        )
+        s3_b = run_named(
+            "D0c_seed_S3_deterministic_np1_repeat_b",
+            d0c_seed_opt_in_overrides(),
+        )
+        results.append(validate_d0c_seed_s3(s3_a, s3_b))
+        results.append(run_d0c_seed_s4(s1_result))
 
     results.append(run_optional_phaseb_lite(include_phaseb))
     results.append(validate_h1(start_snapshot))
