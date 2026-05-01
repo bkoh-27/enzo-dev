@@ -100,8 +100,8 @@ int grid::WriteGrid(FILE *fptr, char *base_name, int grid_id)
        "bhseed_accept_rank", "bhaccr_accreted_mass",
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
-     "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
-     "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
+    "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
+    "bhfdbk_last_feedback_redshift", "bhaccr_last_mdot_realized"};
 #else
     char *ParticleAttributeLabel[] = 
       {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -112,11 +112,11 @@ int grid::WriteGrid(FILE *fptr, char *base_name, int grid_id)
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
      "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
-     "bhfdbk_last_feedback_redshift",
-     "bh_cumul_reservoir_in",  /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN */
-     "bh_cumul_reservoir_out", /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT */
-     "particle_attribute_22",
-     "particle_attribute_23"};
+    "bhfdbk_last_feedback_redshift",
+    "bh_cumul_reservoir_in",  /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN */
+    "bh_cumul_reservoir_out", /* PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT */
+    "bhaccr_last_mdot_realized",
+    "particle_attribute_23"};
 #endif
   char *SmoothedDMLabel[] = {"Dark_Matter_Density", "Velocity_Dispersion",
 			     "Particle_x-velocity", "Particle_y-velocity",

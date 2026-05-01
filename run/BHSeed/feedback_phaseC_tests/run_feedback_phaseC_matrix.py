@@ -91,10 +91,12 @@ DUAL_MBH_BHACCRETION_FATAL = (
 HDF5_EXPECTED_LABELS = (
     "bh_cumul_reservoir_in",
     "bh_cumul_reservoir_out",
+    "bhaccr_last_mdot_realized",
 )
 HDF5_STALE_LABELS = (
     "particle_attribute_20",
     "particle_attribute_21",
+    "particle_attribute_22",
 )
 
 PROTECTED_PATHS = (
@@ -224,6 +226,45 @@ T10_BHFDBK_CATEGORICAL_FIELDS = (
     "burst_diag",
     "burst_occurred",
     "kernel_gas_zero",
+)
+
+D2_1_IO_LABEL_FILES = (
+    "Grid_ReadGrid.C",
+    "Grid_WriteGrid.C",
+    "Grid_Group_ReadGrid.C",
+    "Grid_Group_WriteGrid.C",
+    "New_Grid_ReadGrid.C",
+    "New_Grid_WriteGrid.C",
+    "AMRH5writer.C",
+    "Grid_ConvertToNumpy.C",
+    "Grid_WriteCube.C",
+    "Grid_WriteGridX.C",
+)
+
+D2_1_BHACCR_REQUIRED_FIELDS = (
+    "Mdot_actual",
+    "Mdot_realized",
+    "mdot_actual_code",
+    "mdot_realized_code",
+    "dm_requested",
+    "dm_removed",
+    "frac_gas",
+    "realized_over_requested",
+    "realized_attr_written",
+)
+
+D2_1_BHFDBK_REQUIRED_FIELDS = (
+    "feedback_mdot_basis",
+    "mdot_actual_code",
+    "mdot_realized_code",
+    "mdot_actual_msunyr",
+    "mdot_realized_msunyr",
+    "L_feedback",
+    "L_feedback_realized_basis",
+    "E_requested",
+    "E_requested_realized_basis",
+    "realized_attr_present",
+    "realized_attr_anomalous",
 )
 
 D0C_ACC_REQUIRED_FIELDS = (
@@ -1536,6 +1577,259 @@ def validate_d0c_f6(case):
     return pass_result(
         name,
         f"M={metric:.10f} numerator={numerator:.8e} denominator={denominator:.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d2_1_static_source():
+    name = "D2-1 append-only realized mdot source audit"
+    enzo_dir = ROOT / "src/enzo"
+    typedefs = (enzo_dir / "typedefs.h").read_text()
+    errors = []
+
+    layout_match = re.search(
+        r"#ifdef WINDS\s*"
+        r"(const int PARTICLE_ATTRIBUTE_BHSEED_CHANNEL.*?"
+        r"PARTICLE_ATTRIBUTE_BHFDBK_REQUIRED\s*=\s*.*?;)"
+        r"\s*#else\s*"
+        r"(const int PARTICLE_ATTRIBUTE_BHSEED_CHANNEL.*?"
+        r"PARTICLE_ATTRIBUTE_BHFDBK_REQUIRED\s*=\s*.*?;)"
+        r"\s*#endif",
+        typedefs,
+        re.S,
+    )
+    if layout_match is None:
+        return fail_result(name, "could not split WINDS/non-WINDS typedefs blocks")
+    winds_block = layout_match.group(1)
+    nonwinds_block = layout_match.group(2)
+
+    required_snippets = (
+        (
+            "WINDS realized index",
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED = 23",
+            winds_block,
+        ),
+        (
+            "non-WINDS realized index",
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED = 22",
+            nonwinds_block,
+        ),
+        (
+            "WINDS LAST_MDOT_ACTUAL preserved",
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL = 20",
+            winds_block,
+        ),
+        (
+            "non-WINDS LAST_MDOT_ACTUAL preserved",
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL = 17",
+            nonwinds_block,
+        ),
+        (
+            "non-WINDS feedback reservoir preserved",
+            "PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR = 18",
+            nonwinds_block,
+        ),
+        (
+            "non-WINDS cumulative reservoir out preserved",
+            "PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT  = 21",
+            nonwinds_block,
+        ),
+        (
+            "required count uses realized attribute",
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED + 1",
+            typedefs,
+        ),
+    )
+    for label, snippet, text in required_snippets:
+        if snippet not in text:
+            errors.append(f"{label} missing snippet {snippet!r}")
+
+    for fname in D2_1_IO_LABEL_FILES:
+        text = (enzo_dir / fname).read_text()
+        if "bhaccr_last_mdot_realized" not in text:
+            errors.append(f"{fname} missing bhaccr_last_mdot_realized label")
+        if fname != "Grid_WriteGridX.C" and "particle_attribute_22" in text:
+            errors.append(f"{fname} still contains non-WINDS append placeholder particle_attribute_22")
+
+    acc_text = (enzo_dir / "Grid_BHAccretionHandler.C").read_text()
+    for snippet in (
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED",
+            "Mdot_realized=",
+            "mdot_realized_code=",
+            "realized_over_requested=",
+            "realized_attr_written="):
+        if snippet not in acc_text:
+            errors.append(f"Grid_BHAccretionHandler.C missing {snippet}")
+
+    feedback_text = (enzo_dir / "Grid_BHFeedbackHandler.C").read_text()
+    for snippet in (
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED",
+            "feedback_mdot_basis=%s",
+            "requested_actual",
+            "mdot_realized_code=",
+            "E_requested_realized_basis="):
+        if snippet not in feedback_text:
+            errors.append(f"Grid_BHFeedbackHandler.C missing {snippet}")
+
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:12]})
+    return pass_result(
+        name,
+        "non-WINDS index 22, WINDS index 23, labels and diagnostics present",
+    )
+
+
+def validate_d2_1_realized_rate(case):
+    name = "D2-1 realized mdot accretion diagnostics"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    rows = bhaccr_rows(case.log)
+    row, row_error = select_d0c_acc_row(
+        rows,
+        name,
+        lambda item: item.get("removal_gas_limited") == 1 and
+        is_finite_number(item.get("dm_requested")) and
+        is_finite_number(item.get("dm_removed")) and
+        float(item["dm_requested"]) > 0.0,
+    )
+    if row is None:
+        return fail_result(name, row_error, {"bhaccr_rows": len(rows)}, str(case.log))
+
+    errors = required_field_errors(row, D2_1_BHACCR_REQUIRED_FIELDS)
+    ratio = math.nan
+    if not errors:
+        requested = float(row["Mdot_actual"])
+        realized = float(row["Mdot_realized"])
+        dm_requested = float(row["dm_requested"])
+        dm_removed = float(row["dm_removed"])
+        ratio = dm_removed / dm_requested
+        if requested <= 0.0:
+            errors.append(f"Mdot_actual={requested} expected > 0")
+        if realized <= 0.0:
+            errors.append(f"Mdot_realized={realized} expected > 0")
+        if not (realized < requested):
+            errors.append(
+                f"Mdot_realized={realized:.8e} expected < Mdot_actual={requested:.8e}"
+            )
+        if int(row["realized_attr_written"]) != 1:
+            errors.append(
+                f"realized_attr_written={row['realized_attr_written']} expected 1"
+            )
+        assert_close(
+            errors, "realized/requested from Mdot fields",
+            realized / requested, ratio, 5e-6, 1e-12,
+        )
+        assert_close(
+            errors, "realized_over_requested",
+            float(row["realized_over_requested"]), ratio, 5e-6, 1e-12,
+        )
+        assert_close(
+            errors, "mdot code ratio",
+            float(row["mdot_realized_code"]) / float(row["mdot_actual_code"]),
+            ratio, 5e-6, 1e-12,
+        )
+
+    metrics = {
+        "row": compact_row(row, D2_1_BHACCR_REQUIRED_FIELDS),
+        "dm_removed_over_requested": ratio,
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        f"Mdot_realized/Mdot_actual={float(row['Mdot_realized']) / float(row['Mdot_actual']):.8e}",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d2_1_feedback_diagnostics(case):
+    name = "D2-1 feedback diagnostic read keeps requested basis"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    acc_rows = {
+        (row.get("step"), row.get("bh_id")): row
+        for row in bhaccr_rows(case.log)
+        if row.get("removal_gas_limited") == 1
+    }
+    rows = [
+        row for row in thermal_bhfdbk_rows(case.log)
+        if (row.get("step"), row.get("bh_id")) in acc_rows
+    ]
+    if not rows:
+        return fail_result(
+            name,
+            "no THERMAL [BHFDBK] row matched gas-limited [BHACCR] row",
+            {"bhaccr_gas_limited_rows": len(acc_rows)},
+            str(case.log),
+        )
+    row = rows[0]
+    acc_row = acc_rows[(row.get("step"), row.get("bh_id"))]
+
+    missing = [field for field in D2_1_BHFDBK_REQUIRED_FIELDS if field not in row]
+    non_finite = [
+        field for field in D2_1_BHFDBK_REQUIRED_FIELDS
+        if field != "feedback_mdot_basis" and
+        field in row and not is_finite_number(row[field])
+    ]
+    errors = []
+    if missing:
+        errors.append(
+            f"missing required [BHFDBK] fields {missing}: {row.get('__line', '')}"
+        )
+    if non_finite:
+        errors.append(
+            f"non-finite required [BHFDBK] fields {non_finite}: {row.get('__line', '')}"
+        )
+    if not errors:
+        if row["feedback_mdot_basis"] != "requested_actual":
+            errors.append(
+                f"feedback_mdot_basis={row['feedback_mdot_basis']!r} expected requested_actual"
+            )
+        if int(row["realized_attr_present"]) != 1:
+            errors.append(f"realized_attr_present={row['realized_attr_present']} expected 1")
+        if int(row["realized_attr_anomalous"]) != 0:
+            errors.append(f"realized_attr_anomalous={row['realized_attr_anomalous']} expected 0")
+        assert_close(
+            errors, "BHFDBK mdot_actual_code vs BHACCR",
+            float(row["mdot_actual_code"]), float(acc_row["mdot_actual_code"]),
+            1e-6, 1e-30,
+        )
+        assert_close(
+            errors, "BHFDBK mdot_realized_code vs BHACCR",
+            float(row["mdot_realized_code"]), float(acc_row["mdot_realized_code"]),
+            1e-6, 1e-30,
+        )
+        if not (float(row["mdot_realized_code"]) < float(row["mdot_actual_code"])):
+            errors.append(
+                "expected gas-limited realized mdot below requested/capped mdot: "
+                f"{row.get('__line', '')}"
+            )
+        if not (float(row["E_requested_realized_basis"]) < float(row["E_requested"])):
+            errors.append(
+                "feedback energy appears switched or comparison missing: "
+                f"E_requested_realized_basis={row['E_requested_realized_basis']} "
+                f"E_requested={row['E_requested']}"
+            )
+        if not (float(row["L_feedback_realized_basis"]) < float(row["L_feedback"])):
+            errors.append(
+                "L_feedback comparison does not preserve requested/capped basis"
+            )
+
+    metrics = {
+        "bhaccr_row": compact_row(acc_row, D2_1_BHACCR_REQUIRED_FIELDS),
+        "bhfdbk_row": compact_row(row, D2_1_BHFDBK_REQUIRED_FIELDS),
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "feedback_mdot_basis=requested_actual with lower realized comparison",
         metrics,
         str(case.log),
     )
@@ -3849,8 +4143,8 @@ def validate_h1(start_snapshot):
     name = "H1 repository hygiene"
     end_snapshot = take_hygiene_snapshot()
     errors = []
-    if end_snapshot["diff_src"].strip():
-        errors.append("git diff -- src/enzo/ is non-empty")
+    if end_snapshot["diff_src"] != start_snapshot["diff_src"]:
+        errors.append("git diff -- src/enzo/ changed during harness run")
     if end_snapshot["diff_uuid"].strip():
         errors.append("git diff -- src/enzo/uuid/gen_uuid.c is non-empty")
     if PRESERVED_STASH_SUBSTRING not in end_snapshot["stash"]:
@@ -3864,7 +4158,7 @@ def validate_h1(start_snapshot):
         return fail_result(name, errors[0], {"errors": errors, **metrics})
     return pass_result(
         name,
-        "src/enzo diffs empty; uuid diff empty; preserved stash present; "
+        "src/enzo diff unchanged; uuid diff empty; preserved stash present; "
         "protected-path statuses unchanged",
         metrics,
     )
@@ -4026,6 +4320,8 @@ def main(argv=None):
             "preserved gen_uuid.c stash present at script start",
         ))
 
+    results.append(validate_d2_1_static_source())
+
     missing = preflight_results()
     if missing:
         reason = "; ".join(missing)
@@ -4044,6 +4340,8 @@ def main(argv=None):
             "D0c-acc A2 Eddington cap activation",
             "D0c-acc A5 gas-limited mismatch",
             "D0c-acc F6 mismatch metric",
+            "D2-1 realized mdot accretion diagnostics",
+            "D2-1 feedback diagnostic read keeps requested basis",
             "D0c-seed S0 default-off no-seed",
             "D0c-seed S1 explicit opt-in seed creation",
             "D0c-seed S2 temperature gate no-seed",
@@ -4183,6 +4481,8 @@ def main(argv=None):
         )
         results.append(validate_d0c_a5(a5))
         results.append(validate_d0c_f6(a5))
+        results.append(validate_d2_1_realized_rate(a5))
+        results.append(validate_d2_1_feedback_diagnostics(a5))
 
         # The TS3_wrap initializer does not plant overdense candidate cells when
         # BHSeedingMethod is absent/default-off, so this validates the

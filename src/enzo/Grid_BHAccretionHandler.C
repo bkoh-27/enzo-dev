@@ -64,6 +64,20 @@ static int BHAccretionIsNewlySeededThisPass(PINT particle_id)
   return (particle_id == INT_UNDEFINED);
 }
 
+static void BHAccretionResetRealizedMdot(int NumberOfParticles,
+                                         int *ParticleType,
+                                         float *ParticleAttribute[],
+                                         int NumberOfParticleAttributes)
+{
+  if (NumberOfParticleAttributes <= PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED ||
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED] == NULL)
+    return;
+
+  for (int p = 0; p < NumberOfParticles; p++)
+    if (BHAccretionIsBHType(ParticleType[p]))
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED][p] = 0.0f;
+}
+
 struct BHAccretionParticleOrder {
   PINT *ParticleIDs;
   BHAccretionParticleOrder(PINT *ids) : ParticleIDs(ids) { }
@@ -137,6 +151,9 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 
   if (NumberOfBaryonFields == 0 || NumberOfParticles <= 0)
     return SUCCESS;
+
+  BHAccretionResetRealizedMdot(NumberOfParticles, ParticleType,
+                               ParticleAttribute, NumberOfParticleAttributes);
 
   /* Ensure the transient SF mask exists for accretion cell blocking. */
   if (BaryonField[NumberOfBaryonFields] == NULL) {
@@ -970,14 +987,18 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 	              (n_energy_consistency_fail == 0) ? 1 : 0);
 	    }
 
+    const double mdot_realized =
+      (dt_code > 0.0) ? (dm_removed_total / dt_code) : 0.0;
+    const double realized_over_requested =
+      (mdot_actual > 0.0) ? (mdot_realized / mdot_actual) : 0.0;
+
 	    double mdot_hot_realized = mdot_hot_capped * frac_gas;
     double mdot_cold_realized = mdot_cold_capped * frac_gas;
 
     if (dt_code > 0.0) {
       const double realized_sum = mdot_hot_realized + mdot_cold_realized;
-      const double realized_target = dm_removed_total / dt_code;
-      const double rel_tol = 1.0e-10 * max(1.0, max(fabs(realized_sum), fabs(realized_target)));
-      if (fabs(realized_sum - realized_target) > rel_tol)
+      const double rel_tol = 1.0e-10 * max(1.0, max(fabs(realized_sum), fabs(mdot_realized)));
+      if (fabs(realized_sum - mdot_realized) > rel_tol)
         ENZO_FAIL("BHAccretion invariant failed: realized channel rates do not match dm_removed/dt.");
     }
 
@@ -1018,6 +1039,12 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_EDD_RATIO][p] = float(f_edd);
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL)
       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL][p] = float(mdot_actual);
+    const int realized_attr_written =
+      (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED &&
+       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED] != NULL) ? 1 : 0;
+    if (realized_attr_written)
+      ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED][p] =
+        float(mdot_realized);
 
     const double mass_update_rhs = bh_mass_code + dm_removed_total;
     const double mass_update_scale = max(fabs(bh_mass_new_code), fabs(mass_update_rhs));
@@ -1143,9 +1170,11 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               "Mdot_hot_raw=%.8e Mdot_cold_raw=%.8e Mdot_total_raw=%.8e "
               "Mdot_Edd=%.8e f_Edd=%.8e alpha_boost=%.8g f_AM=%.8g "
               "Mdot_actual=%.8e Mdot_hot_actual=%.8e Mdot_cold_actual=%.8e "
+              "Mdot_realized=%.8e mdot_actual_code=%.15e mdot_realized_code=%.15e "
 	              "cap_active=%d accretion_diag_wall_ms=%.4f "
 	              "dm_requested=%.8e dm_removed=%.8e dm_removed_msun=%.8e "
-	              "frac_cap=%.8g frac_gas=%.8g removal_gas_limited=%d "
+	              "frac_cap=%.8g frac_gas=%.8g realized_over_requested=%.8e "
+              "realized_attr_written=%d removal_gas_limited=%d "
 	              "kernel_truncated=%d accretion_source_rejected=%d "
 	              "removal_kernel_safe_gas=%.8e "
 	              "Mdot_hot_realized=%.8e Mdot_cold_realized=%.8e bh_mass_new=%.8g "
@@ -1167,9 +1196,12 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
               mdot_actual * mdot_to_msunyr,
               mdot_hot_actual * mdot_to_msunyr,
               mdot_cold_actual * mdot_to_msunyr,
+              mdot_realized * mdot_to_msunyr,
+              mdot_actual, mdot_realized,
               cap_active, accretion_diag_wall_ms,
 	              dm_requested, dm_removed_total, dm_removed_msun,
-	              frac_cap, frac_gas, removal_gas_limited,
+	              frac_cap, frac_gas, realized_over_requested,
+              realized_attr_written, removal_gas_limited,
 	              kernel_truncated, accretion_source_rejected,
 	              removal_kernel_safe_gas,
 	              mdot_hot_realized * mdot_to_msunyr,

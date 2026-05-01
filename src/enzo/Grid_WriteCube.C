@@ -130,7 +130,7 @@ int grid::WriteCube(char *base_name, int grid_id, int TGdims[])
        "bhaccr_reservoir_mass", "bhaccr_last_accretion_redshift",
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
        "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
-       "bhfdbk_last_feedback_redshift", "particle_attribute_23"};
+       "bhfdbk_last_feedback_redshift", "bhaccr_last_mdot_realized"};
 #else
     char *ParticleAttributeLabel[] = 
       {"creation_time", "dynamical_time", "metallicity_fraction", "typeia_fraction",
@@ -142,7 +142,7 @@ int grid::WriteCube(char *base_name, int grid_id, int TGdims[])
        "bhaccr_last_eddington_ratio", "bh_formation_mass",
        "bhaccr_last_mdot_actual", "bhfdbk_energy_reservoir",
        "bhfdbk_last_feedback_redshift", "bh_cumul_reservoir_in",
-       "bh_cumul_reservoir_out", "particle_attribute_22",
+       "bh_cumul_reservoir_out", "bhaccr_last_mdot_realized",
        "particle_attribute_23"};
 #endif
 #ifdef IO_LOG
