@@ -275,20 +275,32 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
     double mdot_realized_code = 0.0;
     int realized_attr_present = 0;
     int realized_attr_anomalous = 0;
+    const char *realized_fallback_reason = "none";
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED &&
         ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED] != NULL) {
       realized_attr_present = 1;
       mdot_realized_code =
         ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED][p];
-      if (!isfinite(mdot_realized_code) || mdot_realized_code < 0.0) {
+      if (!isfinite(mdot_realized_code)) {
         realized_attr_anomalous = 1;
+        realized_fallback_reason = "nonfinite";
+        mdot_realized_code = 0.0;
+      } else if (mdot_realized_code < 0.0) {
+        realized_attr_anomalous = 1;
+        realized_fallback_reason = "negative";
         mdot_realized_code = 0.0;
       }
+    } else {
+      realized_fallback_reason = "missing";
     }
+    const int realized_basis_valid =
+      (realized_attr_present && !realized_attr_anomalous) ? 1 : 0;
+    const int realized_zero =
+      (realized_basis_valid && mdot_realized_code == 0.0) ? 1 : 0;
 
     const int thermal_mode = (f_edd > BHFeedbackModeThreshold) ? 1 : 0;
     const char *feedback_mode = thermal_mode ? "THERMAL" : "KINETIC_INACTIVE";
-    const char *feedback_mdot_basis = "requested_actual";
+    const char *feedback_mdot_basis = realized_basis_valid ? "realized" : "requested_actual";
     if (BHFeedbackMethod == 2 && BHFeedbackVerbose >= 1 && !warned_method_two) {
       fprintf(logptr,
               "[BHFDBK_WARN] step=%d level=%d BHFeedbackMethod=2 requested; "
@@ -298,11 +310,16 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       warned_method_two = TRUE;
     }
 
-    const double mdot_cgs = mdot_actual_code * mass_rate_to_cgs;
-    const double L_feedback = BHAccretionRadiativeEfficiency * mdot_cgs * clight * clight;
+    const double mdot_feedback_code = realized_basis_valid ? mdot_realized_code : mdot_actual_code;
+    const double mdot_requested_cgs = mdot_actual_code * mass_rate_to_cgs;
     const double mdot_realized_cgs = mdot_realized_code * mass_rate_to_cgs;
+    const double mdot_feedback_cgs = mdot_feedback_code * mass_rate_to_cgs;
+    const double L_feedback_requested_basis =
+      BHAccretionRadiativeEfficiency * mdot_requested_cgs * clight * clight;
     const double L_feedback_realized_basis =
       BHAccretionRadiativeEfficiency * mdot_realized_cgs * clight * clight;
+    const double L_feedback =
+      BHAccretionRadiativeEfficiency * mdot_feedback_cgs * clight * clight;
 
     double reservoir_before = 0.0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR) {
@@ -320,10 +337,23 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
     int burst_diag = 0;
     int burst_occurred = 0;
 
-    if (thermal_mode && mdot_actual_code > 0.0) {
-      E_requested = BHFeedbackThermalEfficiency * L_feedback * dt_cgs;
-      if (!isfinite(E_requested) || E_requested < 0.0)
-        E_requested = 0.0;
+    double E_requested_wouldbe_requested = 0.0;
+    double E_requested_wouldbe_realized = 0.0;
+    if (thermal_mode) {
+      E_requested_wouldbe_requested =
+        BHFeedbackThermalEfficiency * L_feedback_requested_basis * dt_cgs;
+      if (!isfinite(E_requested_wouldbe_requested) ||
+          E_requested_wouldbe_requested < 0.0)
+        E_requested_wouldbe_requested = 0.0;
+      E_requested_wouldbe_realized =
+        BHFeedbackThermalEfficiency * L_feedback_realized_basis * dt_cgs;
+      if (!isfinite(E_requested_wouldbe_realized) ||
+          E_requested_wouldbe_realized < 0.0)
+        E_requested_wouldbe_realized = 0.0;
+      if (realized_basis_valid)
+        E_requested = E_requested_wouldbe_realized;
+      else
+        E_requested = E_requested_wouldbe_requested;
       const float E_requested_code =
         BHFeedbackReservoirCGSToStored(E_requested, energy_units);
 #ifndef WINDS
@@ -338,14 +368,6 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
         reservoir_final = 0.0;
         burst_diag = 1;
       }
-    }
-    double E_requested_realized_basis = 0.0;
-    if (thermal_mode && mdot_realized_code > 0.0) {
-      E_requested_realized_basis =
-        BHFeedbackThermalEfficiency * L_feedback_realized_basis * dt_cgs;
-      if (!isfinite(E_requested_realized_basis) ||
-          E_requested_realized_basis < 0.0)
-        E_requested_realized_basis = 0.0;
     }
 
     if (this->ComputeTemperatureField(&temperature[0]) == FAIL)
@@ -586,17 +608,19 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       if (!realized_attr_present && BHAccretionMethod && !warned_realized_missing) {
         fprintf(logptr,
                 "[BHFDBK_WARN] step=%d level=%d bh_id=%lld "
-                "bhaccr_last_mdot_realized_missing=1; keeping D2-1 feedback "
-                "basis requested_actual.\n",
+                "bhaccr_last_mdot_realized_missing=1; D2-2 fallback "
+                "feedback_mdot_basis=requested_actual realized_fallback_reason=missing.\n",
                 cycle_number, level, (long long) ParticleNumber[p]);
         warned_realized_missing = TRUE;
       }
       if (realized_attr_anomalous && !warned_realized_anomalous) {
         fprintf(logptr,
                 "[BHFDBK_WARN] step=%d level=%d bh_id=%lld "
-                "bhaccr_last_mdot_realized_anomalous=1; value reset to zero "
-                "for D2-1 diagnostics.\n",
-                cycle_number, level, (long long) ParticleNumber[p]);
+                "bhaccr_last_mdot_realized_anomalous=1 "
+                "realized_fallback_reason=%s; D2-2 fallback "
+                "feedback_mdot_basis=requested_actual.\n",
+                cycle_number, level, (long long) ParticleNumber[p],
+                realized_fallback_reason);
         warned_realized_anomalous = TRUE;
       }
 
@@ -607,7 +631,9 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
               "feedback_mdot_basis=%s mdot_actual_code=%.15e mdot_realized_code=%.15e "
               "mdot_actual_msunyr=%.8e mdot_realized_msunyr=%.8e "
               "realized_attr_present=%d realized_attr_anomalous=%d "
-              "L_feedback_realized_basis=%.8e E_requested_realized_basis=%.8e "
+              "realized_fallback_reason=%s realized_zero=%d "
+              "L_feedback_requested_basis=%.8e L_feedback_realized_basis=%.8e "
+              "E_requested_wouldbe_requested=%.8e E_requested_wouldbe_realized=%.8e "
               "reservoir_before=%.8e burst_diag=%d "
               "E_deposited=%.8e p_requested=%.8e p_deposited=%.8e "
               "feedback_kernel_cells=%d feedback_kernel_active_cells=%d "
@@ -625,7 +651,9 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
               mdot_actual_code * mdot_to_msunyr,
               mdot_realized_code * mdot_to_msunyr,
               realized_attr_present, realized_attr_anomalous,
-              L_feedback_realized_basis, E_requested_realized_basis,
+              realized_fallback_reason, realized_zero,
+              L_feedback_requested_basis, L_feedback_realized_basis,
+              E_requested_wouldbe_requested, E_requested_wouldbe_realized,
               reservoir_before, burst_diag,
               E_deposited, p_requested, p_deposited,
               n_kernel_cells, n_kernel_active_cells,

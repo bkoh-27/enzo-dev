@@ -260,11 +260,37 @@ D2_1_BHFDBK_REQUIRED_FIELDS = (
     "mdot_actual_msunyr",
     "mdot_realized_msunyr",
     "L_feedback",
+    "L_feedback_requested_basis",
     "L_feedback_realized_basis",
     "E_requested",
-    "E_requested_realized_basis",
+    "E_requested_wouldbe_requested",
+    "E_requested_wouldbe_realized",
     "realized_attr_present",
     "realized_attr_anomalous",
+    "realized_fallback_reason",
+    "realized_zero",
+)
+
+D2_2_BHFDBK_REQUIRED_FIELDS = (
+    "feedback_mdot_basis",
+    "mdot_actual_code",
+    "mdot_realized_code",
+    "mdot_actual_msunyr",
+    "mdot_realized_msunyr",
+    "L_feedback",
+    "L_feedback_requested_basis",
+    "L_feedback_realized_basis",
+    "E_requested",
+    "E_requested_wouldbe_requested",
+    "E_requested_wouldbe_realized",
+    "reservoir_before",
+    "reservoir_after_accum",
+    "cumul_reservoir_in_cgs",
+    "conservation_residual_cgs",
+    "realized_attr_present",
+    "realized_attr_anomalous",
+    "realized_fallback_reason",
+    "realized_zero",
 )
 
 D0C_ACC_REQUIRED_FIELDS = (
@@ -1666,9 +1692,11 @@ def validate_d2_1_static_source():
     for snippet in (
             "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED",
             "feedback_mdot_basis=%s",
-            "requested_actual",
+            "realized_fallback_reason=%s",
+            "E_requested_wouldbe_requested=",
+            "E_requested_wouldbe_realized=",
             "mdot_realized_code=",
-            "E_requested_realized_basis="):
+            "L_feedback_realized_basis="):
         if snippet not in feedback_text:
             errors.append(f"Grid_BHFeedbackHandler.C missing {snippet}")
 
@@ -1677,6 +1705,64 @@ def validate_d2_1_static_source():
     return pass_result(
         name,
         "non-WINDS index 22, WINDS index 23, labels and diagnostics present",
+    )
+
+
+def validate_d2_2_static_source():
+    name = "D2-2 realized feedback basis source audit"
+    enzo_dir = ROOT / "src/enzo"
+    feedback_text = (enzo_dir / "Grid_BHFeedbackHandler.C").read_text()
+    errors = []
+
+    for path in (
+            "src/enzo/typedefs.h",
+            "src/enzo/Grid_ReadGrid.C",
+            "src/enzo/Grid_WriteGrid.C",
+            "src/enzo/Grid_Group_ReadGrid.C",
+            "src/enzo/Grid_Group_WriteGrid.C",
+            "src/enzo/New_Grid_ReadGrid.C",
+            "src/enzo/New_Grid_WriteGrid.C",
+            "src/enzo/AMRH5writer.C",
+            "src/enzo/Grid_ConvertToNumpy.C",
+            "src/enzo/Grid_WriteCube.C",
+            "src/enzo/Grid_WriteGridX.C",
+            "src/enzo/Grid_BHAccretionHandler.C"):
+        rc, diff = git_cmd("diff", "--", path)
+        if rc != 0:
+            errors.append(f"git diff failed for {path}: {diff.strip()}")
+        elif diff.strip():
+            errors.append(f"{path} changed during D2-2 despite layout/accretion guard")
+
+    required_snippets = (
+        'feedback_mdot_basis = realized_basis_valid ? "realized" : "requested_actual"',
+        'realized_fallback_reason = "none"',
+        'realized_zero',
+        'mdot_feedback_code = realized_basis_valid ? mdot_realized_code : mdot_actual_code',
+        'L_feedback_requested_basis',
+        'E_requested_wouldbe_requested',
+        'E_requested_wouldbe_realized',
+        'E_requested = E_requested_wouldbe_realized',
+        'realized_fallback_reason=%s',
+    )
+    for snippet in required_snippets:
+        if snippet not in feedback_text:
+            errors.append(f"Grid_BHFeedbackHandler.C missing D2-2 snippet {snippet!r}")
+
+    forbidden_snippets = (
+        "thermal_mode && mdot_realized_code > 0.0",
+        "realized_basis_valid && mdot_realized_code > 0.0",
+    )
+    for snippet in forbidden_snippets:
+        if snippet in feedback_text:
+            errors.append(
+                f"Grid_BHFeedbackHandler.C contains zero-realized fallback risk {snippet!r}"
+            )
+
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:12]})
+    return pass_result(
+        name,
+        "realized basis switch source present; zero realized remains valid; layout files unchanged",
     )
 
 
@@ -1747,7 +1833,7 @@ def validate_d2_1_realized_rate(case):
 
 
 def validate_d2_1_feedback_diagnostics(case):
-    name = "D2-1 feedback diagnostic read keeps requested basis"
+    name = "D2-1 requested-vs-realized feedback diagnostics"
     run_error = validate_case_completed(name, case)
     if run_error:
         return fail_result(name, run_error, log=str(case.log))
@@ -1774,7 +1860,7 @@ def validate_d2_1_feedback_diagnostics(case):
     missing = [field for field in D2_1_BHFDBK_REQUIRED_FIELDS if field not in row]
     non_finite = [
         field for field in D2_1_BHFDBK_REQUIRED_FIELDS
-        if field != "feedback_mdot_basis" and
+        if field not in ("feedback_mdot_basis", "realized_fallback_reason") and
         field in row and not is_finite_number(row[field])
     ]
     errors = []
@@ -1787,14 +1873,20 @@ def validate_d2_1_feedback_diagnostics(case):
             f"non-finite required [BHFDBK] fields {non_finite}: {row.get('__line', '')}"
         )
     if not errors:
-        if row["feedback_mdot_basis"] != "requested_actual":
+        if row["feedback_mdot_basis"] != "realized":
             errors.append(
-                f"feedback_mdot_basis={row['feedback_mdot_basis']!r} expected requested_actual"
+                f"feedback_mdot_basis={row['feedback_mdot_basis']!r} expected realized"
             )
         if int(row["realized_attr_present"]) != 1:
             errors.append(f"realized_attr_present={row['realized_attr_present']} expected 1")
         if int(row["realized_attr_anomalous"]) != 0:
             errors.append(f"realized_attr_anomalous={row['realized_attr_anomalous']} expected 0")
+        if row["realized_fallback_reason"] != "none":
+            errors.append(
+                f"realized_fallback_reason={row['realized_fallback_reason']!r} expected none"
+            )
+        if int(row["realized_zero"]) != 0:
+            errors.append(f"realized_zero={row['realized_zero']} expected 0 for A5")
         assert_close(
             errors, "BHFDBK mdot_actual_code vs BHACCR",
             float(row["mdot_actual_code"]), float(acc_row["mdot_actual_code"]),
@@ -1810,15 +1902,27 @@ def validate_d2_1_feedback_diagnostics(case):
                 "expected gas-limited realized mdot below requested/capped mdot: "
                 f"{row.get('__line', '')}"
             )
-        if not (float(row["E_requested_realized_basis"]) < float(row["E_requested"])):
+        if not (float(row["E_requested_wouldbe_realized"]) <
+                float(row["E_requested_wouldbe_requested"])):
             errors.append(
-                "feedback energy appears switched or comparison missing: "
-                f"E_requested_realized_basis={row['E_requested_realized_basis']} "
-                f"E_requested={row['E_requested']}"
+                "realized energy comparison missing or not smaller in gas-limited case: "
+                f"E_requested_wouldbe_realized={row['E_requested_wouldbe_realized']} "
+                f"E_requested_wouldbe_requested={row['E_requested_wouldbe_requested']}"
             )
-        if not (float(row["L_feedback_realized_basis"]) < float(row["L_feedback"])):
+        assert_close(
+            errors, "E_requested uses realized basis",
+            float(row["E_requested"]), float(row["E_requested_wouldbe_realized"]),
+            5e-6, 1e-20,
+        )
+        assert_close(
+            errors, "L_feedback uses realized basis",
+            float(row["L_feedback"]), float(row["L_feedback_realized_basis"]),
+            5e-6, 1e-20,
+        )
+        if not (float(row["L_feedback_realized_basis"]) <
+                float(row["L_feedback_requested_basis"])):
             errors.append(
-                "L_feedback comparison does not preserve requested/capped basis"
+                "L_feedback realized comparison does not preserve requested/capped comparison"
             )
 
     metrics = {
@@ -1829,7 +1933,119 @@ def validate_d2_1_feedback_diagnostics(case):
         return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
     return pass_result(
         name,
-        "feedback_mdot_basis=requested_actual with lower realized comparison",
+        "feedback_mdot_basis=realized with requested/capped comparison retained",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d2_2_feedback_basis_switch(case):
+    name = "D2-2 feedback energy basis switch"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, log=str(case.log))
+
+    acc_rows = {
+        (row.get("step"), row.get("bh_id")): row
+        for row in bhaccr_rows(case.log)
+        if row.get("removal_gas_limited") == 1
+    }
+    rows = [
+        row for row in thermal_bhfdbk_rows(case.log)
+        if (row.get("step"), row.get("bh_id")) in acc_rows
+    ]
+    if not rows:
+        return fail_result(
+            name,
+            "no THERMAL [BHFDBK] row matched gas-limited [BHACCR] row",
+            {"bhaccr_gas_limited_rows": len(acc_rows)},
+            str(case.log),
+        )
+
+    row = rows[0]
+    acc_row = acc_rows[(row.get("step"), row.get("bh_id"))]
+    missing = [field for field in D2_2_BHFDBK_REQUIRED_FIELDS if field not in row]
+    non_finite = [
+        field for field in D2_2_BHFDBK_REQUIRED_FIELDS
+        if field not in ("feedback_mdot_basis", "realized_fallback_reason") and
+        field in row and not is_finite_number(row[field])
+    ]
+    errors = []
+    if missing:
+        errors.append(f"missing required [BHFDBK] fields {missing}: {row.get('__line', '')}")
+    if non_finite:
+        errors.append(f"non-finite required [BHFDBK] fields {non_finite}: {row.get('__line', '')}")
+    if not errors:
+        if row["feedback_mdot_basis"] != "realized":
+            errors.append(f"feedback_mdot_basis={row['feedback_mdot_basis']!r} expected realized")
+        if row["realized_fallback_reason"] != "none":
+            errors.append(
+                f"realized_fallback_reason={row['realized_fallback_reason']!r} expected none"
+            )
+        if int(row["realized_attr_present"]) != 1:
+            errors.append(f"realized_attr_present={row['realized_attr_present']} expected 1")
+        if int(row["realized_attr_anomalous"]) != 0:
+            errors.append(f"realized_attr_anomalous={row['realized_attr_anomalous']} expected 0")
+        if int(row["realized_zero"]) != 0:
+            errors.append(f"realized_zero={row['realized_zero']} expected 0 for A5")
+
+        assert_close(
+            errors, "BHFDBK mdot_actual_code vs BHACCR",
+            float(row["mdot_actual_code"]), float(acc_row["mdot_actual_code"]),
+            1e-6, 1e-30,
+        )
+        assert_close(
+            errors, "BHFDBK mdot_realized_code vs BHACCR",
+            float(row["mdot_realized_code"]), float(acc_row["mdot_realized_code"]),
+            1e-6, 1e-30,
+        )
+        if not (float(row["mdot_realized_code"]) < float(row["mdot_actual_code"])):
+            errors.append(
+                "A5 should be gas-limited with realized mdot below requested/capped mdot"
+            )
+        if not (float(row["E_requested_wouldbe_realized"]) <
+                float(row["E_requested_wouldbe_requested"])):
+            errors.append(
+                "A5 realized-basis energy should be below requested/capped-basis energy"
+            )
+        assert_close(
+            errors, "E_requested selected realized basis",
+            float(row["E_requested"]), float(row["E_requested_wouldbe_realized"]),
+            5e-6, 1e-20,
+        )
+        assert_close(
+            errors, "L_feedback selected realized basis",
+            float(row["L_feedback"]), float(row["L_feedback_realized_basis"]),
+            5e-6, 1e-20,
+        )
+        assert_close(
+            errors, "reservoir_after_accum uses selected energy",
+            float(row["reservoir_after_accum"]),
+            float(row["reservoir_before"]) + float(row["E_requested"]),
+            5e-6, 1e-20,
+        )
+        assert_close(
+            errors, "cumulative reservoir-in uses selected energy",
+            float(row["cumul_reservoir_in_cgs"]), float(row["E_requested"]),
+            5e-6, 1e-20,
+        )
+        ok, detail = conservation_check(row)
+        if not ok:
+            errors.append(f"conservation check failed after basis switch: {detail}")
+
+    metrics = {
+        "bhaccr_row": compact_row(acc_row, D2_1_BHACCR_REQUIRED_FIELDS),
+        "bhfdbk_row": compact_row(row, D2_2_BHFDBK_REQUIRED_FIELDS),
+        "zero_realized_status": (
+            "source-audited; no cheap existing fixture found with "
+            "mdot_realized_code=0 and mdot_actual_code>0"
+        ),
+    }
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "realized basis selected; E_requested/reservoir/cumulative input use realized energy",
         metrics,
         str(case.log),
     )
@@ -4321,6 +4537,7 @@ def main(argv=None):
         ))
 
     results.append(validate_d2_1_static_source())
+    results.append(validate_d2_2_static_source())
 
     missing = preflight_results()
     if missing:
@@ -4341,7 +4558,8 @@ def main(argv=None):
             "D0c-acc A5 gas-limited mismatch",
             "D0c-acc F6 mismatch metric",
             "D2-1 realized mdot accretion diagnostics",
-            "D2-1 feedback diagnostic read keeps requested basis",
+            "D2-1 requested-vs-realized feedback diagnostics",
+            "D2-2 feedback energy basis switch",
             "D0c-seed S0 default-off no-seed",
             "D0c-seed S1 explicit opt-in seed creation",
             "D0c-seed S2 temperature gate no-seed",
@@ -4483,6 +4701,7 @@ def main(argv=None):
         results.append(validate_d0c_f6(a5))
         results.append(validate_d2_1_realized_rate(a5))
         results.append(validate_d2_1_feedback_diagnostics(a5))
+        results.append(validate_d2_2_feedback_basis_switch(a5))
 
         # The TS3_wrap initializer does not plant overdense candidate cells when
         # BHSeedingMethod is absent/default-off, so this validates the
