@@ -300,6 +300,8 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
 
     const int thermal_mode = (f_edd > BHFeedbackModeThreshold) ? 1 : 0;
     const char *feedback_mode = thermal_mode ? "THERMAL" : "KINETIC_INACTIVE";
+    // Zero realized mdot is a valid realized basis and accumulates zero
+    // energy; it must not fall back to requested/capped mdot.
     const char *feedback_mdot_basis = realized_basis_valid ? "realized" : "requested_actual";
     if (BHFeedbackMethod == 2 && BHFeedbackVerbose >= 1 && !warned_method_two) {
       fprintf(logptr,
@@ -350,6 +352,8 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
       if (!isfinite(E_requested_wouldbe_realized) ||
           E_requested_wouldbe_realized < 0.0)
         E_requested_wouldbe_realized = 0.0;
+      // E_requested is the selected-basis energy: realized when available,
+      // otherwise requested/capped fallback.
       if (realized_basis_valid)
         E_requested = E_requested_wouldbe_realized;
       else

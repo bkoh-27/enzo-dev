@@ -147,6 +147,7 @@ T7_RESTART_FIELDS = (
     "bhaccr_last_eddington_ratio",
     "bh_formation_mass",
     "bhaccr_last_mdot_actual",
+    "bhaccr_last_mdot_realized",
     "bhfdbk_energy_reservoir",
     "bhfdbk_last_feedback_redshift",
     "bh_cumul_reservoir_in",
@@ -164,6 +165,7 @@ T7_EVOLVED_BH_FLOAT_FIELDS = {
     "bhaccr_accreted_mass",
     "bhaccr_last_eddington_ratio",
     "bhaccr_last_mdot_actual",
+    "bhaccr_last_mdot_realized",
     "bhfdbk_energy_reservoir",
     "bh_cumul_reservoir_in",
 }
@@ -293,6 +295,55 @@ D2_2_BHFDBK_REQUIRED_FIELDS = (
     "realized_zero",
 )
 
+D2_3_REALIZED_FIELD = "bhaccr_last_mdot_realized"
+D2_3_ADJACENT_FIELDS = (
+    "bhaccr_last_mdot_actual",
+    "bhfdbk_energy_reservoir",
+    "bhfdbk_last_feedback_redshift",
+    "bh_cumul_reservoir_in",
+    "bh_cumul_reservoir_out",
+)
+D2_3_RESTART_COMPARE_FIELDS = (D2_3_REALIZED_FIELD, *D2_3_ADJACENT_FIELDS)
+# The old-format fallback step actively runs BH feedback. That legitimately
+# changes bhfdbk_energy_reservoir and bh_cumul_reservoir_in, so comparing them
+# for zero diff would be a false failure; their semantics are checked from the
+# BHFDBK diagnostic row instead.
+D2_3_FALLBACK_STABLE_FIELDS = (
+    "bhaccr_last_mdot_actual",
+    "bhfdbk_last_feedback_redshift",
+    "bh_cumul_reservoir_out",
+)
+D2_3_NON_WINDS_LABEL_INDICES = {
+    "bhaccr_last_mdot_actual": 17,
+    "bhfdbk_energy_reservoir": 18,
+    "bhfdbk_last_feedback_redshift": 19,
+    "bh_cumul_reservoir_in": 20,
+    "bh_cumul_reservoir_out": 21,
+    "bhaccr_last_mdot_realized": 22,
+}
+D2_3_WINDS_LABEL_INDICES = {
+    "bhaccr_last_mdot_actual": 20,
+    "bhfdbk_energy_reservoir": 21,
+    "bhfdbk_last_feedback_redshift": 22,
+    "bhaccr_last_mdot_realized": 23,
+}
+D2_3_MISSING_BHFDBK_REQUIRED_FIELDS = (
+    "feedback_mdot_basis",
+    "mdot_actual_code",
+    "mdot_realized_code",
+    "realized_attr_present",
+    "realized_attr_anomalous",
+    "realized_fallback_reason",
+    "realized_zero",
+    "E_requested",
+    "E_requested_wouldbe_requested",
+    "E_requested_wouldbe_realized",
+    "reservoir_before",
+    "reservoir_after_accum",
+    "cumul_reservoir_in_cgs",
+    "conservation_residual_cgs",
+)
+
 D0C_ACC_REQUIRED_FIELDS = (
     "bh_mass",
     "f_hot",
@@ -397,6 +448,17 @@ def set_param(text, key, value):
     if pat.search(text):
         return pat.sub(line, text)
     return text.rstrip() + "\n" + line + "\n"
+
+
+def parameter_int_value(param_path, key):
+    text = Path(param_path).read_text(errors="ignore")
+    match = re.search(rf"^{re.escape(key)}\s*=\s*([^\s#]+)", text, re.MULTILINE)
+    if not match:
+        return None
+    try:
+        return int(float(match.group(1)))
+    except ValueError:
+        return None
 
 
 def remove_param(text, key):
@@ -2048,6 +2110,166 @@ def validate_d2_2_feedback_basis_switch(case):
         "realized basis selected; E_requested/reservoir/cumulative input use realized energy",
         metrics,
         str(case.log),
+    )
+
+
+def particle_attribute_label_lists(path):
+    text = Path(path).read_text()
+    lists = []
+    pattern = re.compile(
+        r"(?:const\s+)?char\s*\*\s*ParticleAttributeLabel\[\]\s*=\s*"
+        r"\{(?P<body>.*?)\};",
+        re.S,
+    )
+    for index, match in enumerate(pattern.finditer(text)):
+        labels = re.findall(r'"([^"]+)"', match.group("body"))
+        if "bhaccr_last_mdot_actual" not in labels:
+            continue
+        style = "non-WINDS" if "bh_cumul_reservoir_in" in labels else "WINDS"
+        lists.append({
+            "path": str(path),
+            "list_index": index,
+            "style": style,
+            "labels": labels,
+        })
+    return lists
+
+
+def validate_label_indices(errors, label_list, expected):
+    labels = label_list["labels"]
+    for label, expected_index in expected.items():
+        if label not in labels:
+            errors.append(
+                f"{label_list['path']} list {label_list['list_index']} "
+                f"{label_list['style']} missing {label}"
+            )
+            continue
+        actual_index = labels.index(label)
+        if actual_index != expected_index:
+            errors.append(
+                f"{label_list['path']} list {label_list['list_index']} "
+                f"{label_list['style']} label {label} index={actual_index} "
+                f"expected {expected_index}"
+            )
+
+
+def parse_typedef_branch_constants():
+    text = (ROOT / "src/enzo/typedefs.h").read_text()
+    match = re.search(
+        r"const int PARTICLE_ATTRIBUTE_TYPEIA_OR_MBH_LAR\s*=\s*3;\s*"
+        r"#ifdef WINDS(?P<winds>.*?)#else(?P<nonwinds>.*?)#endif\s*"
+        r"const int PARTICLE_ATTRIBUTE_BHSEED_REQUIRED",
+        text,
+        re.S,
+    )
+    if not match:
+        return None, None
+
+    def parse_constants(block):
+        constants = {}
+        for name, value in re.findall(
+                r"const int\s+(PARTICLE_ATTRIBUTE_[A-Z0-9_]+)\s*=\s*([0-9]+)\s*;",
+                block):
+            constants[name] = int(value)
+        return constants
+
+    return parse_constants(match.group("winds")), parse_constants(match.group("nonwinds"))
+
+
+def validate_d2_3_hdf5_label_audit():
+    name = "D2-3 HDF5 label consistency audit"
+    errors = []
+    audited = {}
+    for rel_path in D2_1_IO_LABEL_FILES:
+        path = ROOT / "src/enzo" / rel_path
+        lists = particle_attribute_label_lists(path)
+        if not lists:
+            errors.append(f"{rel_path} has no BH ParticleAttributeLabel list")
+            continue
+        saw_nonwinds = False
+        saw_winds = False
+        audited[rel_path] = []
+        for label_list in lists:
+            if label_list["style"] == "non-WINDS":
+                saw_nonwinds = True
+                validate_label_indices(errors, label_list, D2_3_NON_WINDS_LABEL_INDICES)
+            else:
+                saw_winds = True
+                validate_label_indices(errors, label_list, D2_3_WINDS_LABEL_INDICES)
+            audited[rel_path].append({
+                "style": label_list["style"],
+                "list_index": label_list["list_index"],
+                "bhaccr_last_mdot_actual": label_list["labels"].index(
+                    "bhaccr_last_mdot_actual"),
+                "bhaccr_last_mdot_realized": label_list["labels"].index(
+                    "bhaccr_last_mdot_realized"),
+                "bh_cumul_reservoir_in": (
+                    label_list["labels"].index("bh_cumul_reservoir_in")
+                    if "bh_cumul_reservoir_in" in label_list["labels"] else None
+                ),
+                "bh_cumul_reservoir_out": (
+                    label_list["labels"].index("bh_cumul_reservoir_out")
+                    if "bh_cumul_reservoir_out" in label_list["labels"] else None
+                ),
+            })
+        if rel_path == "Grid_WriteGridX.C":
+            if not saw_winds:
+                errors.append("Grid_WriteGridX.C missing its WINDS-style label list")
+        else:
+            if not saw_nonwinds:
+                errors.append(f"{rel_path} missing non-WINDS label list")
+            if not saw_winds:
+                errors.append(f"{rel_path} missing WINDS label list")
+    metrics = {"audited": audited}
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:12], **metrics})
+    return pass_result(
+        name,
+        "realized label is append-only in audited IO label lists; existing labels unmoved",
+        metrics,
+    )
+
+
+def validate_d2_3_winds_nonwinds_index_audit():
+    name = "D2-3 WINDS/non-WINDS particle attribute index audit"
+    winds, nonwinds = parse_typedef_branch_constants()
+    errors = []
+    if winds is None or nonwinds is None:
+        errors.append("failed to parse WINDS/non-WINDS typedef branches")
+    else:
+        expected_winds = {
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED": 23,
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL": 20,
+            "PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR": 21,
+            "PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT": 22,
+        }
+        expected_nonwinds = {
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_REALIZED": 22,
+            "PARTICLE_ATTRIBUTE_BHACCR_LAST_MDOT_ACTUAL": 17,
+            "PARTICLE_ATTRIBUTE_BHFDBK_ENERGY_RESERVOIR": 18,
+            "PARTICLE_ATTRIBUTE_BHFDBK_LAST_REDSHIFT": 19,
+            "PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN": 20,
+            "PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT": 21,
+        }
+        for const, expected in expected_winds.items():
+            if winds.get(const) != expected:
+                errors.append(
+                    f"WINDS {const}={winds.get(const)} expected {expected}")
+        for const, expected in expected_nonwinds.items():
+            if nonwinds.get(const) != expected:
+                errors.append(
+                    f"non-WINDS {const}={nonwinds.get(const)} expected {expected}")
+        for const in ("PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_IN",
+                      "PARTICLE_ATTRIBUTE_BH_CUMUL_RESERVOIR_OUT"):
+            if const in winds:
+                errors.append(f"WINDS branch unexpectedly defines {const}")
+    metrics = {"winds": winds or {}, "nonwinds": nonwinds or {}}
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:12], **metrics})
+    return pass_result(
+        name,
+        "non-WINDS realized=22, WINDS realized=23, cumulative counters non-WINDS only",
+        metrics,
     )
 
 
@@ -3931,6 +4153,29 @@ def run_t7_restart_cases():
     return continuous, first, second, restart_param
 
 
+def run_d2_3_restart_persistence_case():
+    base = run_named(
+        "D2_3_restart_persistence_A5_source",
+        d0c_acc_base_overrides(
+            BHSeedMass="1e10",
+            BHSeedMinEnclosedMass="1e10",
+            BHFeedbackEddingtonFactor="50000",
+            BHAccretionRemovalMode=1,
+            TestStarParticleDensity=51,
+        ),
+    )
+    if base.timed_out or base.rc != 0:
+        return base
+    return d2_3_prepare_copied_restart_case(
+        "D2_3_restart_persistence_A5_restart",
+        base,
+        number_of_particle_attributes=23,
+        bh_accretion_method=0,
+        bh_feedback_method=0,
+        delete_realized=False,
+    )
+
+
 def validate_d0b_t7(continuous, first, second, restart_param):
     name = "D0b-lite T7 restart preservation"
     run_errors = []
@@ -4031,6 +4276,471 @@ def validate_d0b_t7(continuous, first, second, restart_param):
         metrics,
         str(second.log),
     )
+
+
+def find_restart_echo_output(cdir, restart_param_path):
+    restart_meta = parse_output_metadata(restart_param_path)
+    candidates = []
+    for param in output_parameter_files(cdir, prefix="DD"):
+        meta = parse_output_metadata(param)
+        if restart_meta["cycle"] is not None and meta["cycle"] != restart_meta["cycle"]:
+            continue
+        if restart_meta["time"] is not None:
+            if meta["time"] is None:
+                continue
+            if not math.isclose(
+                    float(meta["time"]), float(restart_meta["time"]),
+                    rel_tol=RESTART_FLOAT_RTOL, abs_tol=RESTART_FLOAT_ATOL):
+                continue
+        candidates.append(meta)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: dump_sort_key(Path(item["path"])))
+
+
+def record_field_values(records, field):
+    values = []
+    for record in records:
+        if field in record:
+            values.extend(value_components(record[field]))
+    return values
+
+
+def compare_bh_record_fields(left_records, right_records, fields):
+    errors = []
+    matches, match_error = match_bh_records(left_records, right_records)
+    field_stats = {}
+    compared = []
+    if match_error:
+        return [match_error], field_stats, compared
+    for key, left, right in matches:
+        for field in fields:
+            failure = compare_restart_field(field, key, left, right)
+            if failure:
+                errors.append(
+                    f"field={field} key={key} left={failure.get('continuous')} "
+                    f"right={failure.get('restart')} abs_diff={failure.get('abs_diff')} "
+                    f"rel_diff={failure.get('rel_diff')} files="
+                    f"{failure.get('continuous_file')} {failure.get('restart_file')}"
+                )
+                if len(errors) >= 8:
+                    return errors, field_stats, compared
+            else:
+                compared.append(field)
+                update_field_stats(field_stats, field, left, right)
+    return errors, field_stats, compared
+
+
+def validate_d2_3_copied_restart_persistence(case):
+    name = "D2-3 restart persistence for realized mdot attribute"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, getattr(case, "metrics", {}), str(case.log))
+    metrics = dict(getattr(case, "metrics", {}))
+    restart_param = Path(metrics["restart_param"])
+    after_meta = final_output_metadata(case.cdir)
+    errors = []
+    if after_meta is None:
+        errors.append(f"no post-read output found for {case.cdir}")
+        before_records, after_records = [], []
+    else:
+        before_records, before_errors = collect_bh_particle_records(restart_param)
+        after_records, after_errors = collect_bh_particle_records(after_meta["path"])
+        errors.extend(before_errors)
+        errors.extend(after_errors)
+    if not before_records or not after_records:
+        errors.append(
+            f"BH records missing before={len(before_records)} after={len(after_records)}"
+        )
+    realized_before = record_field_values(before_records, D2_3_REALIZED_FIELD)
+    realized_after = record_field_values(after_records, D2_3_REALIZED_FIELD)
+    if not realized_before or not realized_after:
+        errors.append(
+            f"realized attribute missing before_count={len(realized_before)} "
+            f"after_count={len(realized_after)}"
+        )
+    elif not any(abs(float(value)) > TINY_ABS_TOL for value in realized_before):
+        errors.append(
+            "copied restart source contains only zero realized mdot values; "
+            "this does not prove persistence of a written realized value"
+        )
+    compare_errors, field_stats, compared = compare_bh_record_fields(
+        before_records, after_records, D2_3_RESTART_COMPARE_FIELDS)
+    errors.extend(compare_errors)
+    metrics.update({
+        "before_restart_param": str(restart_param),
+        "after_output": after_meta,
+        "before_realized_present": bool(realized_before),
+        "after_realized_present": bool(realized_after),
+        "before_values": realized_before,
+        "after_values": realized_after,
+        "compared_fields": sorted(set(compared)),
+        "field_differences": field_stats,
+        "tolerance": {
+            "rtol": RESTART_FLOAT_RTOL,
+            "atol": RESTART_FLOAT_ATOL,
+        },
+    })
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "nonzero realized mdot survived copied restart read/write with adjacent attributes intact",
+        metrics,
+        str(case.log),
+    )
+
+
+def d2_3_delete_realized_attr_from_hdf5(files):
+    conda_env_root = DEFAULT_CONDA_BIN.parent.parent
+    helper_pythons = [
+        Path(sys.executable),
+        DEFAULT_CONDA_BIN / "python",
+        Path(os.environ["BH_FEEDBACK_H5PY_PYTHON"])
+        if os.environ.get("BH_FEEDBACK_H5PY_PYTHON") else None,
+        conda_env_root / "yt-env/bin/python",
+    ]
+    code = r"""
+import json
+import sys
+import h5py
+
+target = "bhaccr_last_mdot_realized"
+adjacent = [
+    "bhaccr_last_mdot_actual",
+    "bhfdbk_energy_reservoir",
+    "bhfdbk_last_feedback_redshift",
+    "bh_cumul_reservoir_in",
+    "bh_cumul_reservoir_out",
+]
+info = {"files": [], "deleted": [], "adjacent": {}, "errors": []}
+for path in sys.argv[1:]:
+    file_info = {"path": path, "deleted": []}
+    try:
+        with h5py.File(path, "r+") as h5f:
+            groups = []
+            def collect_groups(name, obj):
+                if hasattr(obj, "keys"):
+                    groups.append((name, obj))
+            groups.append(("", h5f))
+            h5f.visititems(collect_groups)
+            for group_name, group in groups:
+                for label in adjacent:
+                    if label in group:
+                        data = group[label][()]
+                        try:
+                            values = [float(value) for value in data.reshape(-1)]
+                        except AttributeError:
+                            values = [float(data)]
+                        info["adjacent"].setdefault(label, []).extend(values)
+                if target in group:
+                    data = group[target][()]
+                    try:
+                        values = [float(value) for value in data.reshape(-1)]
+                    except AttributeError:
+                        values = [float(data)]
+                    del group[target]
+                    item = {"file": path, "group": "/" + group_name if group_name else "/", "values": values}
+                    file_info["deleted"].append(item)
+                    info["deleted"].append(item)
+    except Exception as err:
+        info["errors"].append(f"{path}: {err}")
+    info["files"].append(file_info)
+print(json.dumps(info))
+"""
+    failures = []
+    seen = set()
+    for helper in helper_pythons:
+        if helper is None:
+            continue
+        if helper in seen:
+            continue
+        seen.add(helper)
+        if not helper.exists():
+            continue
+        proc = run_cmd([helper, "-c", code, *files], cwd=ROOT)
+        if proc.returncode == 0:
+            return json.loads(proc.stdout)
+        failures.append(f"{helper}: rc={proc.returncode} {proc.stdout[-400:]}")
+    return {
+        "files": [str(path) for path in files],
+        "deleted": [],
+        "adjacent": {},
+        "errors": ["h5py helper failed: " + " | ".join(failures)],
+    }
+
+
+def d2_3_prepare_copied_restart_case(
+        name, base_case, number_of_particle_attributes,
+        bh_accretion_method, bh_feedback_method, delete_realized=True):
+    meta = final_output_metadata(base_case.cdir)
+    if meta is None:
+        raise RuntimeError(f"D2-3 base case has no final output: {base_case.cdir}")
+    base_param = Path(meta["path"])
+    base_output_dir = base_param.parent
+    cdir = OUT_ROOT / name
+    if cdir.exists():
+        shutil.rmtree(cdir)
+    cdir.mkdir(parents=True, exist_ok=True)
+    copied_output_dir = cdir / base_output_dir.name
+    shutil.copytree(base_output_dir, copied_output_dir)
+    param_path = copied_output_dir / base_param.name
+    text = param_path.read_text()
+    initial_cycle = meta["cycle"] if meta["cycle"] is not None else 0
+    initial_time = float(meta["time"]) if meta["time"] is not None else 0.0
+    for key, value in {
+            "StopTime": f"{initial_time + 0.01:.17g}",
+            "StopCycle": str(int(initial_cycle) + 1),
+            "dtDataDump": "0.01",
+            "CycleSkipDataDump": "0",
+            "BHSeedingMethod": "0",
+            "BHSeedVerbose": "0",
+            "BHAccretionMethod": str(bh_accretion_method),
+            "BHAccretionRunEveryTimestep": "1",
+            "BHAccretionVerbose": "1",
+            "BHFeedbackMethod": str(bh_feedback_method),
+            "BHFeedbackModeThreshold": "1e-10",
+            "BHFeedbackMinEnergyBurst": "1e50",
+            "BHFeedbackVerbose": "1",
+            "BHRepositionMethod": "0",
+            "NumberOfParticleAttributes": str(number_of_particle_attributes),
+            "SelfGravity": "0",
+    }.items():
+        text = set_param(text, key, value)
+    param_path.write_text(text)
+    h5_files = hdf5_files_for_output(param_path)
+    if delete_realized:
+        edit_info = d2_3_delete_realized_attr_from_hdf5(h5_files)
+    else:
+        edit_info = {
+            "files": [str(path) for path in h5_files],
+            "deleted": [],
+            "adjacent": {},
+            "errors": [],
+        }
+    case = run_enzo(
+        cdir,
+        np_ranks=1,
+        log_name="run.log",
+        param_file=str(param_path.relative_to(cdir)),
+        restart=True,
+    )
+    case.metrics = {
+        "base_output": str(base_output_dir),
+        "copied_output": str(copied_output_dir),
+        "restart_param": str(param_path),
+        "number_of_particle_attributes": number_of_particle_attributes,
+        "restart_param_number_of_particle_attributes": parameter_int_value(
+            param_path, "NumberOfParticleAttributes"),
+        "bh_accretion_method": bh_accretion_method,
+        "bh_feedback_method": bh_feedback_method,
+        "delete_realized": delete_realized,
+        "hdf5_edit": edit_info,
+    }
+    return case
+
+
+def validate_d2_3_missing_label_zero_initialization(case):
+    name = "D2-3 missing realized label zero initialization"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, getattr(case, "metrics", {}), str(case.log))
+    metrics = dict(getattr(case, "metrics", {}))
+    edit = metrics.get("hdf5_edit", {})
+    errors = list(edit.get("errors", []))
+    if not edit.get("deleted"):
+        errors.append("copied restart did not contain a realized attribute to delete")
+    restart_param = Path(metrics["restart_param"])
+    after_meta = final_output_metadata(case.cdir)
+    if after_meta is None:
+        errors.append(f"no post-read output found for {case.cdir}")
+        before_records, after_records = [], []
+    else:
+        before_records, before_errors = collect_bh_particle_records(restart_param)
+        after_records, after_errors = collect_bh_particle_records(after_meta["path"])
+        errors.extend(before_errors)
+        errors.extend(after_errors)
+    if not before_records or not after_records:
+        errors.append(
+            f"BH records missing before={len(before_records)} after={len(after_records)}"
+        )
+    if metrics.get("restart_param_number_of_particle_attributes") != 23:
+        errors.append(
+            "missing-label zero-init restart param NumberOfParticleAttributes="
+            f"{metrics.get('restart_param_number_of_particle_attributes')} expected 23"
+        )
+    after_nattrs = (
+        parameter_int_value(after_meta["path"], "NumberOfParticleAttributes")
+        if after_meta else None
+    )
+    if after_nattrs != 23:
+        errors.append(
+            f"missing-label zero-init output NumberOfParticleAttributes={after_nattrs} expected 23"
+        )
+    realized_before = record_field_values(before_records, D2_3_REALIZED_FIELD)
+    if realized_before:
+        errors.append(
+            f"copied missing-label restart still exposes realized field: {realized_before}"
+        )
+    realized_after = record_field_values(after_records, D2_3_REALIZED_FIELD)
+    if not realized_after:
+        errors.append("realized attribute absent after missing-label restart with 23 attrs")
+    elif any(abs(float(value)) > TINY_ABS_TOL for value in realized_after):
+        errors.append(f"realized attribute not zero-initialized: {realized_after}")
+    compare_errors, field_stats, compared = compare_bh_record_fields(
+        before_records, after_records, D2_3_ADJACENT_FIELDS)
+    errors.extend(compare_errors)
+    metrics.update({
+        "after_output": after_meta,
+        "after_number_of_particle_attributes": after_nattrs,
+        "before_realized_present": bool(realized_before),
+        "after_realized_present": bool(realized_after),
+        "realized_after": realized_after,
+        "deleted_paths": [
+            f"{item.get('file')}:{item.get('group')}/{D2_3_REALIZED_FIELD}"
+            for item in edit.get("deleted", [])
+        ],
+        "compared_adjacent_fields": sorted(set(compared)),
+        "adjacent_differences": field_stats,
+    })
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "missing realized label read as a zero-initialized appended slot",
+        metrics,
+        str(case.log),
+    )
+
+
+def validate_d2_3_missing_attribute_feedback_fallback(case):
+    name = "D2-3 old-restart missing realized attribute feedback fallback"
+    run_error = validate_case_completed(name, case)
+    if run_error:
+        return fail_result(name, run_error, getattr(case, "metrics", {}), str(case.log))
+    metrics = dict(getattr(case, "metrics", {}))
+    edit = metrics.get("hdf5_edit", {})
+    errors = list(edit.get("errors", []))
+    if not edit.get("deleted"):
+        errors.append("copied restart did not contain a realized attribute to delete")
+    rows = all_thermal_bhfdbk_rows(case.log)
+    row = rows[0] if rows else {}
+    if not rows:
+        errors.append("no THERMAL [BHFDBK] row after old-format copied restart")
+    else:
+        missing = [field for field in D2_3_MISSING_BHFDBK_REQUIRED_FIELDS if field not in row]
+        if missing:
+            errors.append(f"missing [BHFDBK] fields {missing}: {row.get('__line', '')}")
+        elif row["feedback_mdot_basis"] != "requested_actual":
+            errors.append(f"feedback_mdot_basis={row['feedback_mdot_basis']!r} expected requested_actual")
+        elif int(row["realized_attr_present"]) != 0:
+            errors.append(f"realized_attr_present={row['realized_attr_present']} expected 0")
+        elif row["realized_fallback_reason"] != "missing":
+            errors.append(f"realized_fallback_reason={row['realized_fallback_reason']!r} expected missing")
+        else:
+            assert_close(
+                errors, "fallback E_requested requested basis",
+                float(row["E_requested"]), float(row["E_requested_wouldbe_requested"]),
+                5e-6, 1e-20,
+            )
+            assert_close(
+                errors, "fallback realized wouldbe zero",
+                float(row["E_requested_wouldbe_realized"]), 0.0,
+                0.0, 1e-30,
+            )
+            assert_close(
+                errors, "fallback reservoir accumulation",
+                float(row["reservoir_after_accum"]),
+                float(row["reservoir_before"]) + float(row["E_requested"]),
+                5e-6, 1e-20,
+            )
+            ok, detail = conservation_check(row)
+            if not ok:
+                errors.append(f"fallback conservation check failed: {detail}")
+
+    restart_param = Path(metrics["restart_param"])
+    after_meta = final_output_metadata(case.cdir)
+    if after_meta is None:
+        errors.append(f"no post-read output found for {case.cdir}")
+        before_records, after_records = [], []
+    else:
+        before_records, before_errors = collect_bh_particle_records(restart_param)
+        after_records, after_errors = collect_bh_particle_records(after_meta["path"])
+        errors.extend(before_errors)
+        errors.extend(after_errors)
+    if not before_records or not after_records:
+        errors.append(
+            f"BH records missing before={len(before_records)} after={len(after_records)}"
+        )
+    if metrics.get("restart_param_number_of_particle_attributes") != 22:
+        errors.append(
+            "old-format fallback restart param NumberOfParticleAttributes="
+            f"{metrics.get('restart_param_number_of_particle_attributes')} expected 22"
+        )
+    after_nattrs = (
+        parameter_int_value(after_meta["path"], "NumberOfParticleAttributes")
+        if after_meta else None
+    )
+    if after_nattrs != 22:
+        errors.append(
+            f"old-format fallback output NumberOfParticleAttributes={after_nattrs} expected 22"
+        )
+    realized_before = record_field_values(before_records, D2_3_REALIZED_FIELD)
+    if realized_before:
+        errors.append(
+            f"old-format 22-attribute restart unexpectedly exposes realized field: {realized_before}"
+        )
+    realized_after = record_field_values(after_records, D2_3_REALIZED_FIELD)
+    if realized_after:
+        errors.append(
+            f"old-format 22-attribute restart unexpectedly wrote realized field: {realized_after}"
+        )
+    compare_errors, field_stats, compared = compare_bh_record_fields(
+        before_records, after_records, D2_3_FALLBACK_STABLE_FIELDS)
+    errors.extend(compare_errors)
+    metrics.update({
+        "after_output": after_meta,
+        "after_number_of_particle_attributes": after_nattrs,
+        "bhfdbk_row": compact_row(row, D2_3_MISSING_BHFDBK_REQUIRED_FIELDS) if row else {},
+        "before_realized_present": bool(realized_before),
+        "after_realized_present": bool(realized_after),
+        "realized_after": realized_after,
+        "deleted_paths": [
+            f"{item.get('file')}:{item.get('group')}/{D2_3_REALIZED_FIELD}"
+            for item in edit.get("deleted", [])
+        ],
+        "compared_adjacent_fields": sorted(set(compared)),
+        "adjacent_differences": field_stats,
+    })
+    if errors:
+        return fail_result(name, errors[0], {"errors": errors[:8], **metrics}, str(case.log))
+    return pass_result(
+        name,
+        "old-format restart without realized slot falls back to requested_actual safely",
+        metrics,
+        str(case.log),
+    )
+
+
+def run_d2_3_missing_attribute_cases(base_case):
+    zero_init = d2_3_prepare_copied_restart_case(
+        "D2_3_missing_label_zero_init",
+        base_case,
+        number_of_particle_attributes=23,
+        bh_accretion_method=0,
+        bh_feedback_method=0,
+    )
+    fallback = d2_3_prepare_copied_restart_case(
+        "D2_3_old_restart_missing_attr_fallback",
+        base_case,
+        number_of_particle_attributes=22,
+        bh_accretion_method=0,
+        bh_feedback_method=1,
+    )
+    return [
+        validate_d2_3_missing_label_zero_initialization(zero_init),
+        validate_d2_3_missing_attribute_feedback_fallback(fallback),
+    ]
 
 
 def mpi_environment_failure(log_path):
@@ -4538,6 +5248,8 @@ def main(argv=None):
 
     results.append(validate_d2_1_static_source())
     results.append(validate_d2_2_static_source())
+    results.append(validate_d2_3_hdf5_label_audit())
+    results.append(validate_d2_3_winds_nonwinds_index_audit())
 
     missing = preflight_results()
     if missing:
@@ -4560,6 +5272,9 @@ def main(argv=None):
             "D2-1 realized mdot accretion diagnostics",
             "D2-1 requested-vs-realized feedback diagnostics",
             "D2-2 feedback energy basis switch",
+            "D2-3 restart persistence for realized mdot attribute",
+            "D2-3 missing realized label zero initialization",
+            "D2-3 old-restart missing realized attribute feedback fallback",
             "D0c-seed S0 default-off no-seed",
             "D0c-seed S1 explicit opt-in seed creation",
             "D0c-seed S2 temperature gate no-seed",
@@ -4670,6 +5385,8 @@ def main(argv=None):
             t7_second,
             t7_restart_param,
         ))
+        results.append(validate_d2_3_copied_restart_persistence(
+            run_d2_3_restart_persistence_case()))
 
         t10_np1, t10_npn, t10_config = run_t10_cases()
         results.append(validate_d0b_t10(t10_np1, t10_npn, t10_config))
@@ -4702,6 +5419,7 @@ def main(argv=None):
         results.append(validate_d2_1_realized_rate(a5))
         results.append(validate_d2_1_feedback_diagnostics(a5))
         results.append(validate_d2_2_feedback_basis_switch(a5))
+        results.extend(run_d2_3_missing_attribute_cases(a5))
 
         # The TS3_wrap initializer does not plant overdense candidate cells when
         # BHSeedingMethod is absent/default-off, so this validates the
