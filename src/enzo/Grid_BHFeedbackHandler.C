@@ -63,6 +63,61 @@ struct BHFeedbackKernelCell {
   BHFeedbackKernelCell(int n, double m) : index(n), mass_code(m) { }
 };
 
+static int BHFeedbackPositionCoveredByChild(HierarchyEntry *SubgridPointer,
+                                            FLOAT *pos)
+{
+  for (HierarchyEntry *sub = SubgridPointer; sub != NULL;
+       sub = sub->NextGridThisLevel)
+    if (sub->GridData != NULL && sub->GridData->PointInGrid(pos))
+      return TRUE;
+
+  return FALSE;
+}
+
+static int BHFeedbackNonAuthoritativeMassRatio(
+  int num_particle_attributes,
+  float *particle_attribute[],
+  int p,
+  double particle_mass,
+  double *expected_full_mass,
+  double *ratio)
+{
+  if (expected_full_mass != NULL)
+    *expected_full_mass = -1.0;
+  if (ratio != NULL)
+    *ratio = -1.0;
+
+  if (num_particle_attributes <= PARTICLE_ATTRIBUTE_BH_FORMATION_MASS ||
+      num_particle_attributes <= PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] == NULL ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] == NULL)
+    return FALSE;
+
+  if (!isfinite(particle_mass) || particle_mass <= 0.0)
+    return FALSE;
+
+  const double formation_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
+  const double accreted_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
+
+  if (!isfinite(formation_mass) || formation_mass <= 0.0 ||
+      !isfinite(accreted_mass) || accreted_mass < 0.0)
+    return FALSE;
+
+  const double full_mass = formation_mass + accreted_mass;
+  if (!isfinite(full_mass) || full_mass <= 0.0)
+    return FALSE;
+
+  const double mass_ratio = full_mass / particle_mass;
+  if (expected_full_mass != NULL)
+    *expected_full_mass = full_mass;
+  if (ratio != NULL)
+    *ratio = mass_ratio;
+
+  return (isfinite(mass_ratio) && mass_ratio > 1.5) ? TRUE : FALSE;
+}
+
 static double BHFeedbackKernelRadiusCode(float KernelRadiusPhysKpc,
                                          FLOAT time,
                                          float LengthUnits)
@@ -230,10 +285,47 @@ int grid::BHFeedbackHandler(HierarchyEntry* SubgridPointer,
     if (!this->PointInGrid(bh_pos))
       continue;
 
-    if (!BHAccretionRunEveryTimestep && SubgridPointer != NULL)
+    const double bh_mass_code = ParticleMass[p];
+
+    if (SubgridPointer != NULL &&
+        BHFeedbackPositionCoveredByChild(SubgridPointer, bh_pos)) {
+      if (BHFeedbackVerbose >= 1) {
+        double expected_full_mass = -1.0;
+        double ratio = -1.0;
+        BHFeedbackNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &ratio);
+        fprintf(logptr,
+                "[BHFDBK_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=child_covered\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, ratio);
+      }
+      continue;
+    }
+
+    if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
       continue;
 
-    const double bh_mass_code = ParticleMass[p];
+    double expected_full_mass = -1.0;
+    double mass_attribute_ratio = -1.0;
+    if (BHFeedbackNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &mass_attribute_ratio)) {
+      if (BHFeedbackVerbose >= 1) {
+        fprintf(logptr,
+                "[BHFDBK_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=mass_attribute_ratio\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, mass_attribute_ratio);
+      }
+      continue;
+    }
+
     const double bh_mass_msun = bh_mass_code * mass_to_msun;
 
     if (BHFeedbackIsNewlySeededThisPass(ParticleNumber[p])) {

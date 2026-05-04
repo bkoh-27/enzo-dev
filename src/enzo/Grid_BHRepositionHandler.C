@@ -55,6 +55,61 @@ struct BHRepositionParticleOrder {
   }
 };
 
+static int BHRepositionPositionCoveredByChild(HierarchyEntry *SubgridPointer,
+                                              FLOAT *pos)
+{
+  for (HierarchyEntry *sub = SubgridPointer; sub != NULL;
+       sub = sub->NextGridThisLevel)
+    if (sub->GridData != NULL && sub->GridData->PointInGrid(pos))
+      return TRUE;
+
+  return FALSE;
+}
+
+static int BHRepositionNonAuthoritativeMassRatio(
+  int num_particle_attributes,
+  float *particle_attribute[],
+  int p,
+  double particle_mass,
+  double *expected_full_mass,
+  double *ratio)
+{
+  if (expected_full_mass != NULL)
+    *expected_full_mass = -1.0;
+  if (ratio != NULL)
+    *ratio = -1.0;
+
+  if (num_particle_attributes <= PARTICLE_ATTRIBUTE_BH_FORMATION_MASS ||
+      num_particle_attributes <= PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] == NULL ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] == NULL)
+    return FALSE;
+
+  if (!isfinite(particle_mass) || particle_mass <= 0.0)
+    return FALSE;
+
+  const double formation_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
+  const double accreted_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
+
+  if (!isfinite(formation_mass) || formation_mass <= 0.0 ||
+      !isfinite(accreted_mass) || accreted_mass < 0.0)
+    return FALSE;
+
+  const double full_mass = formation_mass + accreted_mass;
+  if (!isfinite(full_mass) || full_mass <= 0.0)
+    return FALSE;
+
+  const double mass_ratio = full_mass / particle_mass;
+  if (expected_full_mass != NULL)
+    *expected_full_mass = full_mass;
+  if (ratio != NULL)
+    *ratio = mass_ratio;
+
+  return (isfinite(mass_ratio) && mass_ratio > 1.5) ? TRUE : FALSE;
+}
+
 static int BHRepositionLexicographicLess(const FLOAT *lhs, const FLOAT *rhs,
                                          int rank)
 {
@@ -247,21 +302,49 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     bh_pos[1] = (GridRank > 1) ? ParticlePosition[1][p] : 0.0;
     bh_pos[2] = (GridRank > 2) ? ParticlePosition[2][p] : 0.0;
 
-    if (!BHAccretionRunEveryTimestep && SubgridPointer != NULL) {
-      int covered_by_child = FALSE;
-      for (HierarchyEntry *sub = SubgridPointer; sub != NULL;
-           sub = sub->NextGridThisLevel) {
-        if (sub->GridData != NULL && sub->GridData->PointInGrid(bh_pos)) {
-          covered_by_child = TRUE;
-          break;
-        }
+    const double bh_mass_code = ParticleMass[p];
+
+    if (SubgridPointer != NULL &&
+        BHRepositionPositionCoveredByChild(SubgridPointer, bh_pos)) {
+      if (BHRepositionVerbose >= 1) {
+        double expected_full_mass = -1.0;
+        double ratio = -1.0;
+        BHRepositionNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &ratio);
+        fprintf(logptr,
+                "[BHREPOS_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=child_covered\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, ratio);
       }
-      if (covered_by_child)
-        continue;
+      continue;
     }
+
+    if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
+      continue;
 
     if (!this->PointInGrid(bh_pos))
       continue;
+
+    double expected_full_mass = -1.0;
+    double mass_attribute_ratio = -1.0;
+    if (BHRepositionNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &mass_attribute_ratio)) {
+      if (BHRepositionVerbose >= 1) {
+        fprintf(logptr,
+                "[BHREPOS_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=mass_attribute_ratio\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, mass_attribute_ratio);
+      }
+      continue;
+    }
 
     if (BHRepositionIsNewlySeededThisPass(ParticleNumber[p])) {
       const double reposition_wall_ms = 1000.0 * (ReturnWallTime() - t0);

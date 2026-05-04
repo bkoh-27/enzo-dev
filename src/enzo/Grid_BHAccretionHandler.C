@@ -90,6 +90,61 @@ struct BHAccretionParticleOrder {
   }
 };
 
+static int BHAccretionPositionCoveredByChild(HierarchyEntry *SubgridPointer,
+                                             FLOAT *pos)
+{
+  for (HierarchyEntry *sub = SubgridPointer; sub != NULL;
+       sub = sub->NextGridThisLevel)
+    if (sub->GridData != NULL && sub->GridData->PointInGrid(pos))
+      return TRUE;
+
+  return FALSE;
+}
+
+static int BHAccretionNonAuthoritativeMassRatio(
+  int num_particle_attributes,
+  float *particle_attribute[],
+  int p,
+  double particle_mass,
+  double *expected_full_mass,
+  double *ratio)
+{
+  if (expected_full_mass != NULL)
+    *expected_full_mass = -1.0;
+  if (ratio != NULL)
+    *ratio = -1.0;
+
+  if (num_particle_attributes <= PARTICLE_ATTRIBUTE_BH_FORMATION_MASS ||
+      num_particle_attributes <= PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] == NULL ||
+      particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] == NULL)
+    return FALSE;
+
+  if (!isfinite(particle_mass) || particle_mass <= 0.0)
+    return FALSE;
+
+  const double formation_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
+  const double accreted_mass =
+    particle_attribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
+
+  if (!isfinite(formation_mass) || formation_mass <= 0.0 ||
+      !isfinite(accreted_mass) || accreted_mass < 0.0)
+    return FALSE;
+
+  const double full_mass = formation_mass + accreted_mass;
+  if (!isfinite(full_mass) || full_mass <= 0.0)
+    return FALSE;
+
+  const double mass_ratio = full_mass / particle_mass;
+  if (expected_full_mass != NULL)
+    *expected_full_mass = full_mass;
+  if (ratio != NULL)
+    *ratio = mass_ratio;
+
+  return (isfinite(mass_ratio) && mass_ratio > 1.5) ? TRUE : FALSE;
+}
+
 static double BHAccretionKernelRadiusCode(float KernelRadiusPhysKpc,
                                           FLOAT time,
                                           float LengthUnits,
@@ -271,36 +326,56 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     if (BHAccretionIsNewlySeededThisPass(ParticleNumber[p]))
       continue;
 
-    if (!BHAccretionRunEveryTimestep && SubgridPointer != NULL) {
-      FLOAT bh_pos[MAX_DIMENSION];
-      bh_pos[0] = ParticlePosition[0][p];
-      bh_pos[1] = (GridRank > 1) ? ParticlePosition[1][p] : 0.0;
-      bh_pos[2] = (GridRank > 2) ? ParticlePosition[2][p] : 0.0;
-
-      int covered_by_child = FALSE;
-      for (HierarchyEntry *sub = SubgridPointer; sub != NULL;
-           sub = sub->NextGridThisLevel) {
-        if (sub->GridData != NULL && sub->GridData->PointInGrid(bh_pos)) {
-          covered_by_child = TRUE;
-          break;
-        }
-      }
-      if (covered_by_child)
-        continue;
-    }
-
-    const double t0_all = ReturnWallTime();
-
-    const double bh_mass_code = ParticleMass[p];
-    if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
-      continue;
-
     FLOAT bh_pos[MAX_DIMENSION];
     bh_pos[0] = ParticlePosition[0][p];
     bh_pos[1] = (GridRank > 1) ? ParticlePosition[1][p] : 0.0;
     bh_pos[2] = (GridRank > 2) ? ParticlePosition[2][p] : 0.0;
+
+    const double bh_mass_code = ParticleMass[p];
+
+    if (SubgridPointer != NULL &&
+        BHAccretionPositionCoveredByChild(SubgridPointer, bh_pos)) {
+      if (BHAccretionVerbose >= 1) {
+        double expected_full_mass = -1.0;
+        double ratio = -1.0;
+        BHAccretionNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &ratio);
+        fprintf(logptr,
+                "[BHACCR_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=child_covered\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, ratio);
+      }
+      continue;
+    }
+
+    if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
+      continue;
+
     if (!this->PointInGrid(bh_pos))
       continue;
+
+    double expected_full_mass = -1.0;
+    double mass_attribute_ratio = -1.0;
+    if (BHAccretionNonAuthoritativeMassRatio(
+          NumberOfParticleAttributes, ParticleAttribute, p, bh_mass_code,
+          &expected_full_mass, &mass_attribute_ratio)) {
+      if (BHAccretionVerbose >= 1) {
+        fprintf(logptr,
+                "[BHACCR_SKIP_NON_AUTHORITATIVE] step=%d level=%d grid_id=%d "
+                "bh_id=%lld particle_index=%d ParticleMass=%.15e "
+                "expected_full_mass=%.15e ratio=%.15e reason=mass_attribute_ratio\n",
+                cycle_number, level, this->GetGridID(),
+                (long long) ParticleNumber[p], p, bh_mass_code,
+                expected_full_mass, mass_attribute_ratio);
+      }
+      continue;
+    }
+
+    const double t0_all = ReturnWallTime();
 
     const double bh_mass_msun = bh_mass_code * mass_to_msun;
     const double bh_vel_x = ParticleVelocity[0][p];
@@ -1014,16 +1089,22 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
         v = 0.0f;
     }
 
+    int bh_formation_mass_initialized = 0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS) {
       float &v = ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p];
-      if (!isfinite(v) || v <= 0.0f)
+      if (!isfinite(v) || v <= 0.0f) {
         v = float(bh_mass_code);
+        bh_formation_mass_initialized = 1;
+      }
     }
 
+    int bh_accreted_mass_initialized = 0;
     if (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS) {
       float &v = ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p];
-      if (!isfinite(v) || v < 0.0f)
+      if (!isfinite(v) || v < 0.0f) {
         v = 0.0f;
+        bh_accreted_mass_initialized = 1;
+      }
       v += float(dm_removed_total);
     }
 
@@ -1062,8 +1143,36 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
       const double invariant_rhs = formation_mass_code + accreted_mass_code;
       const double mass_scale = max(fabs(bh_mass_new_code), fabs(invariant_rhs));
       const double invariant_tol = (mass_scale > 0.0) ? 1.0e-8 * mass_scale : 1.0e-30;
-      if (fabs(bh_mass_new_code - invariant_rhs) > invariant_tol)
+      const double invariant_residual = bh_mass_new_code - invariant_rhs;
+      if (fabs(invariant_residual) > invariant_tol) {
+        const double rel_residual =
+          (mass_scale > 0.0) ? fabs(invariant_residual) / mass_scale : 0.0;
+        fprintf(stderr,
+                "[BHACCR_INVARIANT_FAIL] rank=%d processor=%d step=%d level=%d "
+                "grid_id=%d particle_index=%d bh_id=%lld particle_type=%d "
+                "NumberOfParticleAttributes=%d ParticleMass=%.15e "
+                "bh_mass_code=%.15e bh_mass_new_code=%.15e "
+                "BHFormationMass=%.15e BHAccretedMass=%.15e "
+                "expected_mass=%.15e residual=%.15e abs_residual=%.15e "
+                "rel_residual=%.15e tolerance=%.15e Time=%.15e dt=%.15e "
+                "dm_requested=%.15e dm_removed=%.15e mdot_actual=%.15e "
+                "mdot_realized=%.15e formation_mass_initialized=%d "
+                "accreted_mass_initialized=%d pos_x=%.15e pos_y=%.15e pos_z=%.15e\n",
+                MyProcessorNumber, ProcessorNumber, cycle_number, level,
+                this->GetGridID(), p, (long long) ParticleNumber[p],
+                ParticleType[p], NumberOfParticleAttributes,
+                double(ParticleMass[p]), bh_mass_code, bh_mass_new_code,
+                formation_mass_code, accreted_mass_code, invariant_rhs,
+                invariant_residual, fabs(invariant_residual), rel_residual,
+                invariant_tol, double(Time), dt_code, dm_requested,
+                dm_removed_total, mdot_actual, mdot_realized,
+                bh_formation_mass_initialized, bh_accreted_mass_initialized,
+                double(ParticlePosition[0][p]),
+                (GridRank > 1) ? double(ParticlePosition[1][p]) : 0.0,
+                (GridRank > 2) ? double(ParticlePosition[2][p]) : 0.0);
+        fflush(stderr);
         ENZO_FAIL("BHAccretion invariant failed: BH mass != BHFormationMass + BHAccretedMass.");
+      }
     }
 
     if (BHAccretionVerbose >= 1) {
