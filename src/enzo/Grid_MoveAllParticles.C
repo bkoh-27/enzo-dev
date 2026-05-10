@@ -29,6 +29,77 @@
 #include "Grid.h"
 #include "ActiveParticle.h"
 
+static int ParticleHasAbsoluteBHMass(int particle_type)
+{
+  return particle_type == PARTICLE_TYPE_MBH ||
+         particle_type == PARTICLE_TYPE_BLACK_HOLE;
+}
+
+static void ReportBHParticleAMRMassTransfer(const char *path,
+                                            const char *direction,
+                                            int from_level, int to_level,
+                                            const char *factor_name,
+                                            double factor,
+                                            int particle_type,
+                                            PINT particle_id,
+                                            double mass_before,
+                                            double mass_after,
+                                            float **attributes,
+                                            int particle_index,
+                                            const char *action)
+{
+  if (!ParticleHasAbsoluteBHMass(particle_type))
+    return;
+
+  const int has_mass_attrs =
+    attributes != NULL &&
+    NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS &&
+    NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS;
+
+  double formation_mass = 0.0;
+  double accreted_mass = 0.0;
+  double expected_mass = 0.0;
+  double ratio_before = -1.0;
+  double ratio_after = -1.0;
+  int suspicious = FALSE;
+
+  if (has_mass_attrs) {
+    formation_mass =
+      attributes[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][particle_index];
+    accreted_mass =
+      attributes[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][particle_index];
+    expected_mass = formation_mass + accreted_mass;
+
+    if (expected_mass > 0.0 && mass_before > 0.0)
+      ratio_before = mass_before / expected_mass;
+    if (expected_mass > 0.0 && mass_after > 0.0)
+      ratio_after = mass_after / expected_mass;
+
+    suspicious =
+      ratio_before > 1.5 || ratio_after > 1.5 ||
+      (ratio_before > 0.0 && ratio_before < 1.0/1.5) ||
+      (ratio_after > 0.0 && ratio_after < 1.0/1.5);
+  }
+
+  if (!suspicious && BHAccretionVerbose < 2)
+    return;
+
+  FILE *log_fptr = suspicious ? stderr : (Outfptr != NULL ? Outfptr : stdout);
+  fprintf(log_fptr,
+          "[BH_PARTICLE_AMR_MASS_TRANSFER] path=%s direction=%s "
+          "from_level=%d to_level=%d factor_name=%s factor=%.8e "
+          "particle_type=%d particle_id=%lld ParticleMass_before=%.16e "
+          "ParticleMass_after=%.16e BHFormationMass=%.16e "
+          "BHAccretedMass=%.16e expected_mass=%.16e "
+          "ratio_before_to_expected=%.8e ratio_after_to_expected=%.8e "
+          "processor=%d action=%s\n",
+          path, direction, from_level, to_level, factor_name, factor,
+          particle_type, (long long) particle_id, mass_before, mass_after,
+          formation_mass, accreted_mass, expected_mass, ratio_before,
+          ratio_after, MyProcessorNumber, action);
+  fflush(log_fptr);
+}
+
 int grid::MoveAllParticles(int NumberOfGrids, grid* FromGrid[])
 {
 
@@ -125,9 +196,24 @@ int grid::MoveAllParticles(int NumberOfGrids, grid* FromGrid[])
   for (grid = 0; grid < NumberOfGrids; grid++) {
 
     for (i = 0; i < FromGrid[grid]->NumberOfParticles; i++) {
-      Mass[Index+i] = FromGrid[grid]->ParticleMass[i] * MassDecrease;
+      const int is_bh_mass_absolute =
+	ParticleHasAbsoluteBHMass(FromGrid[grid]->ParticleType[i]);
+      const float mass_before = FromGrid[grid]->ParticleMass[i];
+      const float mass_after = is_bh_mass_absolute ?
+	mass_before : mass_before * MassDecrease;
+      Mass[Index+i] = mass_after;
       Number[Index+i] = FromGrid[grid]->ParticleNumber[i];
       Type[Index+i] = FromGrid[grid]->ParticleType[i];
+      ReportBHParticleAMRMassTransfer("Grid_MoveAllParticles",
+				      "child_to_parent",
+				      FromGrid[grid]->GetLevel(),
+				      this->GetLevel(),
+				      "MassDecrease", MassDecrease,
+				      FromGrid[grid]->ParticleType[i],
+				      FromGrid[grid]->ParticleNumber[i],
+				      mass_before, mass_after,
+				      FromGrid[grid]->ParticleAttribute, i,
+				      "bh_preserved_absolute_mass");
     }
     
     for (dim = 0; dim < GridRank; dim++)
@@ -291,9 +377,24 @@ int grid::MoveAllParticlesOld(int NumberOfGrids, grid* FromGrid[])
       //	     FromGrid[grid]->NumberOfParticles);
 
       for (i = 0; i < FromGrid[grid]->NumberOfParticles; i++) {
-	Mass[Index+i] = FromGrid[grid]->ParticleMass[i] * MassDecrease;
+	const int is_bh_mass_absolute =
+	  ParticleHasAbsoluteBHMass(FromGrid[grid]->ParticleType[i]);
+	const float mass_before = FromGrid[grid]->ParticleMass[i];
+	const float mass_after = is_bh_mass_absolute ?
+	  mass_before : mass_before * MassDecrease;
+	Mass[Index+i] = mass_after;
 	Number[Index+i] = FromGrid[grid]->ParticleNumber[i];
 	Type[Index+i] = FromGrid[grid]->ParticleType[i];
+	ReportBHParticleAMRMassTransfer("Grid_MoveAllParticlesOld",
+					"child_to_parent",
+					FromGrid[grid]->GetLevel(),
+					this->GetLevel(),
+					"MassDecrease", MassDecrease,
+					FromGrid[grid]->ParticleType[i],
+					FromGrid[grid]->ParticleNumber[i],
+					mass_before, mass_after,
+					FromGrid[grid]->ParticleAttribute, i,
+					"bh_preserved_absolute_mass");
       }
 
       for (dim = 0; dim < GridRank; dim++)
@@ -320,8 +421,23 @@ int grid::MoveAllParticlesOld(int NumberOfGrids, grid* FromGrid[])
       /* Change mass, as required. */
 
       if (MyProcessorNumber == ProcessorNumber)
-	for (i = Index; i < Index+FromGrid[grid]->NumberOfParticles; i++)
-	  Mass[i] *= MassDecrease;
+	for (i = 0; i < FromGrid[grid]->NumberOfParticles; i++) {
+	  const int is_bh_mass_absolute =
+	    ParticleHasAbsoluteBHMass(Type[Index+i]);
+	  const float mass_before = Mass[Index+i];
+	  const float mass_after = is_bh_mass_absolute ?
+	    mass_before : mass_before * MassDecrease;
+	  Mass[Index+i] = mass_after;
+	  ReportBHParticleAMRMassTransfer("Grid_MoveAllParticlesOld",
+					  "child_to_parent",
+					  FromGrid[grid]->GetLevel(),
+					  this->GetLevel(),
+					  "MassDecrease", MassDecrease,
+					  Type[Index+i], Number[Index+i],
+					  mass_before, mass_after,
+					  Attribute, Index+i,
+					  "bh_preserved_absolute_mass");
+	}
 
     }
 
