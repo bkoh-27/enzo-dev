@@ -331,10 +331,12 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     bh_pos[1] = (GridRank > 1) ? ParticlePosition[1][p] : 0.0;
     bh_pos[2] = (GridRank > 2) ? ParticlePosition[2][p] : 0.0;
 
-    const double bh_mass_code = ParticleMass[p];
+    double bh_mass_code = ParticleMass[p];
 
-    if (SubgridPointer != NULL &&
-        BHAccretionPositionCoveredByChild(SubgridPointer, bh_pos)) {
+    const int child_covered =
+      (SubgridPointer != NULL &&
+       BHAccretionPositionCoveredByChild(SubgridPointer, bh_pos)) ? 1 : 0;
+    if (child_covered) {
       if (BHAccretionVerbose >= 1) {
         double expected_full_mass = -1.0;
         double ratio = -1.0;
@@ -355,7 +357,8 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     if (!isfinite(bh_mass_code) || bh_mass_code <= 0.0)
       continue;
 
-    if (!this->PointInGrid(bh_pos))
+    const int point_in_grid = this->PointInGrid(bh_pos) ? 1 : 0;
+    if (!point_in_grid)
       continue;
 
     double expected_full_mass = -1.0;
@@ -373,6 +376,92 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
                 expected_full_mass, mass_attribute_ratio);
       }
       continue;
+    }
+
+    const double reconcile_max_rel = 1.0e-4;
+    const int has_mass_attrs =
+      (NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BH_FORMATION_MASS &&
+       NumberOfParticleAttributes > PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS &&
+       ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS] != NULL &&
+       ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS] != NULL) ? 1 : 0;
+    const double particle_mass_before = double(ParticleMass[p]);
+    const double formation_mass_code = has_mass_attrs ?
+      double(ParticleAttribute[PARTICLE_ATTRIBUTE_BH_FORMATION_MASS][p]) : -1.0;
+    const double accreted_mass_code = has_mass_attrs ?
+      double(ParticleAttribute[PARTICLE_ATTRIBUTE_BHACCR_ACCRETED_MASS][p]) : -1.0;
+    const double expected_mass = has_mass_attrs ?
+      formation_mass_code + accreted_mass_code : -1.0;
+    const double residual =
+      (has_mass_attrs && isfinite(particle_mass_before) && isfinite(expected_mass)) ?
+      particle_mass_before - expected_mass : -1.0;
+    const double abs_residual = isfinite(residual) ? fabs(residual) : -1.0;
+    const double mass_scale =
+      (has_mass_attrs && isfinite(particle_mass_before) && isfinite(expected_mass)) ?
+      max(fabs(particle_mass_before), fabs(expected_mass)) : -1.0;
+    const double mass_sync_tolerance =
+      (isfinite(mass_scale) && mass_scale > 0.0) ? 1.0e-8 * mass_scale : 1.0e-30;
+    const double rel_residual =
+      (isfinite(abs_residual) && isfinite(mass_scale) && mass_scale > 0.0) ?
+      abs_residual / mass_scale : -1.0;
+    const int mass_bookkeeping_valid =
+      (has_mass_attrs &&
+       isfinite(particle_mass_before) && particle_mass_before > 0.0 &&
+       isfinite(formation_mass_code) && formation_mass_code > 0.0 &&
+       isfinite(accreted_mass_code) && accreted_mass_code >= 0.0 &&
+       isfinite(expected_mass) && expected_mass > 0.0 &&
+       isfinite(residual) && isfinite(abs_residual) &&
+       isfinite(rel_residual)) ? 1 : 0;
+
+    if (!mass_bookkeeping_valid ||
+        abs_residual > mass_sync_tolerance) {
+      const int small_upward_mismatch =
+        (mass_bookkeeping_valid &&
+         particle_mass_before < expected_mass &&
+         rel_residual <= reconcile_max_rel) ? 1 : 0;
+
+      if (small_upward_mismatch) {
+        ParticleMass[p] = float(expected_mass);
+        bh_mass_code = expected_mass;
+
+        fprintf(logptr,
+                "[BHACCR_MASS_RECONCILE] rank=%d processor=%d step=%d level=%d "
+                "grid_id=%d particle_index=%d bh_id=%lld "
+                "ParticleMass_before=%.15e BHFormationMass=%.15e "
+                "BHAccretedMass=%.15e expected_mass=%.15e residual=%.15e "
+                "abs_residual=%.15e rel_residual=%.15e tolerance=%.15e "
+                "reconcile_max_rel=%.15e ParticleMass_after=%.15e "
+                "bh_mass_code_after=%.15e Time=%.15e "
+                "action=particle_mass_set_to_expected\n",
+                MyProcessorNumber, ProcessorNumber, cycle_number, level,
+                this->GetGridID(), p, (long long) ParticleNumber[p],
+                particle_mass_before, formation_mass_code, accreted_mass_code,
+                expected_mass, residual, abs_residual, rel_residual,
+                mass_sync_tolerance, reconcile_max_rel, double(ParticleMass[p]),
+                bh_mass_code, double(Time));
+        fflush(logptr);
+      } else {
+        const double precheck_dt_code = max(0.0, double(this->dtFixed));
+        fprintf(stderr,
+                "[BHACCR_MASS_MISMATCH_PRE] rank=%d processor=%d step=%d level=%d "
+                "grid_id=%d particle_index=%d bh_id=%lld particle_type=%d "
+                "NumberOfParticleAttributes=%d ParticleMass_before=%.15e "
+                "BHFormationMass=%.15e BHAccretedMass=%.15e "
+                "expected_mass=%.15e residual=%.15e abs_residual=%.15e "
+                "rel_residual=%.15e tolerance=%.15e "
+                "reconcile_max_rel=%.15e child_covered=%d point_in_grid=%d "
+                "mass_attribute_ratio=%.15e authority_status=passed_authority_gates "
+                "Time=%.15e dt_code=%.15e action=fail_before_gas_removal\n",
+                MyProcessorNumber, ProcessorNumber, cycle_number, level,
+                this->GetGridID(), p, (long long) ParticleNumber[p],
+                ParticleType[p], NumberOfParticleAttributes,
+                particle_mass_before, formation_mass_code, accreted_mass_code,
+                expected_mass, residual, abs_residual, rel_residual,
+                mass_sync_tolerance, reconcile_max_rel, child_covered,
+                point_in_grid, mass_attribute_ratio, double(Time),
+                precheck_dt_code);
+        fflush(stderr);
+        ENZO_FAIL("BHAccretion pre-update invariant failed: BH mass != BHFormationMass + BHAccretedMass.");
+      }
     }
 
     const double t0_all = ReturnWallTime();
