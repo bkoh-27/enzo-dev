@@ -681,7 +681,7 @@ int grid::BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer,
         mdot_bondi_cold = 4.0*pi*g_code*g_code*bh_mass_code*bh_mass_code*cold_rho_avg /
                           cold_denom;
       if (v_rot_cold > 0.0)
-        f_am = min(1.0, double(BHAccretionCVisc) * pow(cold_cs_avg / v_rot_cold, 3.0));
+        f_am = min(1.0, pow(cold_cs_avg / v_rot_cold, 3.0) / double(BHAccretionCVisc));
       else
         f_am = 1.0;
       if (f_am < 0.0)

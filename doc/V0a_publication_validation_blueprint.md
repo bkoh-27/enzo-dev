@@ -167,13 +167,14 @@ BHAccretionAlphaMax = 10.0.
 
 ```
 mdot_bondi_cold = 4π G² M_BH² ρ_cold / (c_s,cold² + v_rel,cold²)^(3/2)
-f_AM = min(1, BHAccretionCVisc × (c_s,cold / v_rot,cold)³)     if v_rot > 0
+f_AM = min(1, (c_s,cold / v_rot,cold)³ / BHAccretionCVisc)     if v_rot > 0
 f_AM = 1.0                                                       if v_rot = 0
 mdot_cold_raw = f_AM × mdot_bondi_cold
 ```
 
-Default: BHAccretionCVisc = 2π ≈ 6.283. v_rot is computed from specific
-angular momentum in the kernel (lines 388-390, 427-428).
+Default: BHAccretionCVisc = 2π ≈ 6.283; larger values apply stronger
+angular-momentum suppression. v_rot is computed from specific angular
+momentum in the kernel (lines 388-390, 427-428).
 
 **Eddington cap** (lines 480-506):
 

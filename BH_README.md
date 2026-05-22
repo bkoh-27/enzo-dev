@@ -479,7 +479,7 @@ Defaults come from `src/enzo/SetDefaultGlobalValues.C`.
 | `BHAccretionRemovalRadius` | `1` | reserved (Phase B) |
 | `BHAccretionTSplitFloor` | `5e5` | active (K, fallback split) |
 | `BHAccretionColdModel` | `0` | active (AM-suppressed Bondi) |
-| `BHAccretionCVisc` | `6.283` | active |
+| `BHAccretionCVisc` | `6.283` | active; larger values suppress cold accretion more strongly |
 | `BHAccretionNHStar` | `0.1` | active (cm^-3) |
 | `BHAccretionBeta` | `1.0` | active |
 | `BHAccretionAlphaMax` | `10.0` | active |
@@ -577,7 +577,7 @@ What Phase B still does **not** do:
 | `BHAccretionRemovalMode` | `0` | active (`0` multi-cell, `1` single-cell debug) |
 | `BHAccretionTSplitFloor` | `5e5` | active |
 | `BHAccretionColdModel` | `0` | active (AM-suppressed Bondi) |
-| `BHAccretionCVisc` | `6.283` | active |
+| `BHAccretionCVisc` | `6.283` | active; larger values suppress cold accretion more strongly |
 | `BHAccretionNHStar` | `0.1` | active |
 | `BHAccretionBeta` | `1.0` | active |
 | `BHAccretionAlphaMax` | `10.0` | active |

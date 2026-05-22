@@ -79,7 +79,7 @@ Defaults are from `src/enzo/SetDefaultGlobalValues.C`.
 | `BHAccretionRemovalRadius` | `1` | Removal kernel radius. | cell widths |
 | `BHAccretionRemovalMode` | `0` | `0` multi-cell, `1` host-cell debug. | enum |
 | `BHAccretionTSplitFloor` | `5e5` | Temperature fallback split for hot/cold. | K |
-| `BHAccretionCVisc` | `6.283` | Angular-momentum suppression scale. | dimensionless |
+| `BHAccretionCVisc` | `6.283` | Angular-momentum suppression scale; larger values suppress cold accretion more strongly. | dimensionless |
 | `BHAccretionNHStar` | `0.1` | Density threshold for hot-channel boost. | cm^-3 |
 | `BHAccretionBeta` | `1.0` | Slope of hot boost factor. | dimensionless |
 | `BHAccretionAlphaMax` | `10.0` | Maximum hot boost cap. | dimensionless |

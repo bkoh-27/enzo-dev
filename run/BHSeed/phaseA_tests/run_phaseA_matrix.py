@@ -49,6 +49,7 @@ SIGMA_T = 6.6524587158e-25
 CLIGHT = 2.99792458e10
 MSUN = 1.989e33
 YR_S = 3.1557e7
+BHACCR_CVISC = 6.283
 
 REL_TOL = 3e-3
 ABS_TOL = 1e-12
@@ -491,14 +492,20 @@ def test11_check(bh, lines, case_dir):
 
 
 def test12_check(bh, lines, case_dir):
-    # Reconstruct cold Bondi then compare suppression
-    m_bh = bh["bh_mass"] * MSUN
-    rho = bh["rho_cold_avg"]
-    cs = bh["cs_hot_avg"]  # only hot cs logged; for cold use c_s from f_AM relation via V_rot? fallback to parse mdot ratio
-    # Compute expected f_AM from logged relation directly
-    # f_AM is directly logged; we validate strong suppression and mdot consistency.
-    ok = (bh["f_AM"] < 1e-2 and bh["Mdot_cold_raw"] > 0.0 and bh["V_rot_cold"] > bh["cs_hot_avg"])
-    return ok, f"f_AM={bh['f_AM']:.3e} V_rot_cold={bh['V_rot_cold']:.3e}", {"f_AM": bh["f_AM"], "V_rot_cold": bh["V_rot_cold"]}
+    cs = bh["cs_cold_avg"]
+    vrot = bh["V_rot_cold"]
+    expected = 1.0 if vrot <= 0.0 else min(1.0, (cs / vrot) ** 3 / BHACCR_CVISC)
+    ok = (
+        bh["Mdot_cold_raw"] > 0.0 and
+        vrot > 0.0 and
+        almost_equal(bh["f_AM"], expected, rel=2e-3)
+    )
+    return ok, f"f_AM={bh['f_AM']:.6e} expected={expected:.6e} V_rot_cold={vrot:.6e} cs_cold={cs:.6e}", {
+        "f_AM": bh["f_AM"],
+        "expected_f_AM": expected,
+        "V_rot_cold": vrot,
+        "cs_cold_avg": cs,
+    }
 
 
 def test13_check(bh, lines, case_dir):
