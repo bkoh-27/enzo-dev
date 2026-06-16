@@ -2278,13 +2278,21 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
     ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics/source path).");
 
-  if (MBHAccretion == 1 && BHAccretionMethod > 0)
-    ENZO_FAIL("MBHAccretion=1 and BHAccretionMethod>0 are mutually exclusive. "
-              "MBHAccretion enables the legacy MBH accretion path, while "
-              "BHAccretionMethod enables the new BH accretion path. Enabling both "
-              "can double-accrete the same black hole. Use MBHAccretion=1 with "
-              "BHAccretionMethod=0 for legacy runs, or MBHAccretion=0 with "
-              "BHAccretionMethod>0 for new-path runs.");
+  if (MBHAccretion > 0 && BHAccretionMethod > 0)
+    ENZO_FAIL("MBHAccretion>0 and BHAccretionMethod>0 are mutually exclusive. "
+              "MBHAccretion enables the legacy MBH accretion path "
+              "(modes 1-5, 12-15), while BHAccretionMethod enables the "
+              "new BH accretion handler. Enabling both can double-accrete. "
+              "Set MBHAccretion=0 to use the new path, or "
+              "BHAccretionMethod=0 to use the legacy path.");
+
+  if (MBHFeedback > 0 && BHFeedbackMethod > 0)
+    ENZO_FAIL("MBHFeedback>0 and BHFeedbackMethod>0 are mutually exclusive. "
+              "MBHFeedback enables the legacy MBH thermal/jet feedback path, "
+              "while BHFeedbackMethod enables the new BH feedback handler. "
+              "Enabling both can double-deposit feedback energy. Set "
+              "MBHFeedback=0 to use the new path, or BHFeedbackMethod=0 "
+              "to use the legacy path.");
 
   if (BHAccretionMethod) {
     if (BHAccretionKernelRadius <= 0.0f)
