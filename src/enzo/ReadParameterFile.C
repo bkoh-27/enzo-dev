@@ -2294,6 +2294,14 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
               "MBHFeedback=0 to use the new path, or BHFeedbackMethod=0 "
               "to use the legacy path.");
 
+  if (ClusterSMBHFeedback && BHFeedbackMethod > 0)
+    if (MyProcessorNumber == ROOT_PROCESSOR)
+      fprintf(stderr,
+              "WARNING: ClusterSMBHFeedback and BHFeedbackMethod are both "
+              "enabled. These are independent feedback systems (static cluster "
+              "jet vs per-BH-particle) that can both deposit energy into grid "
+              "fields in the same timestep. This combination is unvalidated.\n");
+
   if (BHAccretionMethod) {
     if (BHAccretionKernelRadius <= 0.0f)
       ENZO_FAIL("BHAccretionKernelRadius must be positive (units: physical kpc).");
