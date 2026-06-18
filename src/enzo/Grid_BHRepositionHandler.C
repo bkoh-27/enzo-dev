@@ -242,6 +242,39 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
   if (bh_particles.empty())
     return SUCCESS;
 
+  static int bhrepos_invocation_seq_counter = 0;
+  const int bhrepos_invocation_seq = ++bhrepos_invocation_seq_counter;
+
+  const int bhrepos_processor = MyProcessorNumber;
+  const int bhrepos_grid_id = this->GetGridID();
+
+  int bhrepos_summary_rows = 0;
+  int bhrepos_summary_moved = 0;
+  int bhrepos_summary_method0_rows = 0;
+  int bhrepos_summary_diagnostic_only_rows = 0;
+  int bhrepos_summary_active_radius_was_capped = 0;
+  int bhrepos_summary_active_target_exists = 0;
+  int bhrepos_summary_effective_active_target_exists = 0;
+  int bhrepos_summary_effective_reposition_rejected = 0;
+  int bhrepos_summary_legacy_active_reposition_rejected = 0;
+  int bhrepos_summary_search_exceeds_ghost = 0;
+  int bhrepos_summary_search_truncated_by_grid = 0;
+  int bhrepos_summary_effective_search_truncated_by_grid = 0;
+  int bhrepos_summary_under_resolved = 0;
+  int bhrepos_summary_no_effective_target = 0;
+  int bhrepos_summary_newly_seeded = 0;
+  int bhrepos_detail_rows_emitted = 0;
+
+  double bhrepos_summary_max_displacement_cells = 0.0;
+  double bhrepos_summary_max_effective_active_peak_offset_kpc = 0.0;
+  double bhrepos_summary_max_search_radius_over_dx = search_radius_over_dx;
+
+  const int bhrepos_detail_rows_complete =
+    (BHRepositionVerbose >= 2) ? 1 : 0;
+
+  int bhrepos_legacy_reject_warn_count = 0;
+  const int bhrepos_legacy_reject_warn_first_n = 10;
+
   const int potential_requested = (BHRepositionDiagnosePotential == 1);
   int potential_available = (PotentialField != NULL);
   int grav_dim[MAX_DIMENSION] = {1, 1, 1};
@@ -357,41 +390,65 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 
     if (BHRepositionIsNewlySeededThisPass(ParticleNumber[p])) {
       const double reposition_wall_ms = 1000.0 * (ReturnWallTime() - t0);
-      fprintf(logptr,
-              "[BHREPOS] step=%d level=%d z=%.8g bh_id=%lld "
-              "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
-              "bh_density=%.8e "
-              "diag_peak_pos_x=%.15g diag_peak_pos_y=%.15g diag_peak_pos_z=%.15g "
-              "diag_peak_density=%.8e diag_peak_in_ghost=%d diag_peak_offset_kpc=%.8g "
-              "active_peak_pos_x=%.15g active_peak_pos_y=%.15g active_peak_pos_z=%.15g "
-              "active_peak_density=%.8e active_peak_offset_kpc=%.8g active_target_exists=%d "
-              "offset_from_potential_kpc=%.8g "
-              "displacement_kpc=%.8g displacement_cells=%.8g "
-              "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
-              "method=%d diagnostic_only=%d search_kernel_truncated=%d "
-              "active_reposition_rejected=%d "
-              "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f "
-              "effective_active_radius_cells=%.8g active_radius_was_capped=%d "
-              "effective_active_target_exists=%d "
-              "effective_active_peak_density=%.8e "
-              "effective_active_peak_offset_kpc=%.8g "
-              "effective_search_truncated_by_grid=%d "
-              "effective_reposition_rejected=%d rejection_reason=%d\n",
-              cycle_number, level, zred, (long long) ParticleNumber[p],
-              bh_pos[0], bh_pos[1], bh_pos[2],
-              0.0,
-              bh_pos[0], bh_pos[1], bh_pos[2],
-              0.0, 0, -1.0,
-              bh_pos[0], bh_pos[1], bh_pos[2],
-              0.0, -1.0, 0,
-              -1.0,
-              0.0, 0.0,
-              0, 0, 1,
-              BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
-              0, 0,
-              0, 0, reposition_wall_ms,
-              effective_active_radius_cells, active_radius_was_capped,
-              0, 0.0, -1.0, 0, 0, 6);
+      bhrepos_summary_rows++;
+      bhrepos_summary_method0_rows +=
+        (BHRepositionMethod == 0) ? 1 : 0;
+      bhrepos_summary_diagnostic_only_rows +=
+        (BHRepositionMethod == 0) ? 1 : 0;
+      bhrepos_summary_active_radius_was_capped +=
+        active_radius_was_capped ? 1 : 0;
+      bhrepos_summary_newly_seeded++;
+      bhrepos_summary_under_resolved +=
+        (search_radius_over_dx < 1.5) ? 1 : 0;
+      bhrepos_summary_search_exceeds_ghost +=
+        search_exceeds_ghost ? 1 : 0;
+      bhrepos_summary_no_effective_target++;
+
+      if (BHRepositionVerbose >= 2) {
+        fprintf(logptr,
+                "[BHREPOS] processor=%d invocation_seq=%d grid_id=%d "
+                "step=%d level=%d z=%.8g bh_id=%lld "
+                "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
+                "bh_density=%.8e "
+                "diag_peak_pos_x=%.15g diag_peak_pos_y=%.15g diag_peak_pos_z=%.15g "
+                "diag_peak_density=%.8e diag_peak_in_ghost=%d diag_peak_offset_kpc=%.8g "
+                "active_peak_pos_x=%.15g active_peak_pos_y=%.15g active_peak_pos_z=%.15g "
+                "active_peak_density=%.8e active_peak_offset_kpc=%.8g active_target_exists=%d "
+                "offset_from_potential_kpc=%.8g "
+                "displacement_kpc=%.8g displacement_cells=%.8g "
+                "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
+                "method=%d diagnostic_only=%d search_kernel_truncated=%d "
+                "active_reposition_rejected=%d "
+                "search_exceeds_ghost=%d search_truncated_by_grid=%d "
+                "search_radius_over_dx=%.8g under_resolved=%d "
+                "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f "
+                "effective_active_radius_cells=%.8g active_radius_was_capped=%d "
+                "effective_active_target_exists=%d "
+                "effective_active_peak_density=%.8e "
+                "effective_active_peak_offset_kpc=%.8g "
+                "effective_search_truncated_by_grid=%d "
+                "effective_reposition_rejected=%d rejection_reason=%d\n",
+                bhrepos_processor, bhrepos_invocation_seq, bhrepos_grid_id,
+                cycle_number, level, zred, (long long) ParticleNumber[p],
+                bh_pos[0], bh_pos[1], bh_pos[2],
+                0.0,
+                bh_pos[0], bh_pos[1], bh_pos[2],
+                0.0, 0, -1.0,
+                bh_pos[0], bh_pos[1], bh_pos[2],
+                0.0, -1.0, 0,
+                -1.0,
+                0.0, 0.0,
+                0, 0, 1,
+                BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
+                0, 0,
+                search_exceeds_ghost, 0,
+                search_radius_over_dx,
+                (search_radius_over_dx < 1.5) ? 1 : 0,
+                0, 0, reposition_wall_ms,
+                effective_active_radius_cells, active_radius_was_capped,
+                0, 0.0, -1.0, 0, 0, 6);
+        bhrepos_detail_rows_emitted++;
+      }
       continue;
     }
 
@@ -609,17 +666,23 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
     int reposition_clamped = 0;
 
     FLOAT bh_pos_new[MAX_DIMENSION] = {bh_pos[0], bh_pos[1], bh_pos[2]};
-    if (active_reposition_rejected && BHRepositionVerbose >= 1) {
-      fprintf(logptr,
-              "[BHREPOS_WARN] step=%d level=%d bh_id=%lld "
-              "active_reposition_rejected=1 search_radius_over_dx=%.6g "
-              "NumberOfGhostZones=%d search_truncated_by_grid=%d "
-              "legacy_full_radius_diagnostic=1 effective_reposition_rejected=%d "
-              "rejection_reason=%d; effective fields control particle movement.\n",
-              cycle_number, level, (long long) ParticleNumber[p],
-              search_radius_over_dx, NumberOfGhostZones,
-              search_truncated_by_grid, effective_reposition_rejected,
-              rejection_reason);
+    if (active_reposition_rejected) {
+      bhrepos_legacy_reject_warn_count++;
+      if (BHRepositionVerbose >= 2 ||
+          (BHRepositionVerbose >= 1 &&
+           bhrepos_legacy_reject_warn_count <=
+           bhrepos_legacy_reject_warn_first_n)) {
+        fprintf(logptr,
+                "[BHREPOS_WARN] step=%d level=%d bh_id=%lld "
+                "active_reposition_rejected=1 search_radius_over_dx=%.6g "
+                "NumberOfGhostZones=%d search_truncated_by_grid=%d "
+                "legacy_full_radius_diagnostic=1 effective_reposition_rejected=%d "
+                "rejection_reason=%d; effective fields control particle movement.\n",
+                cycle_number, level, (long long) ParticleNumber[p],
+                search_radius_over_dx, NumberOfGhostZones,
+                search_truncated_by_grid, effective_reposition_rejected,
+                rejection_reason);
+      }
     }
 
     if (BHRepositionMethod > 0 && effective_active_target_exists &&
@@ -699,41 +762,127 @@ int grid::BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer,
 
     const double reposition_wall_ms = 1000.0 * (ReturnWallTime() - t0);
 
+    bhrepos_summary_rows++;
+    bhrepos_summary_moved += reposition_occurred ? 1 : 0;
+    bhrepos_summary_method0_rows += (BHRepositionMethod == 0) ? 1 : 0;
+    bhrepos_summary_diagnostic_only_rows +=
+      (BHRepositionMethod == 0) ? 1 : 0;
+    bhrepos_summary_active_radius_was_capped +=
+      active_radius_was_capped ? 1 : 0;
+    bhrepos_summary_active_target_exists +=
+      active_target_exists ? 1 : 0;
+    bhrepos_summary_effective_active_target_exists +=
+      effective_active_target_exists ? 1 : 0;
+    bhrepos_summary_effective_reposition_rejected +=
+      effective_reposition_rejected ? 1 : 0;
+    bhrepos_summary_legacy_active_reposition_rejected +=
+      active_reposition_rejected ? 1 : 0;
+    bhrepos_summary_search_exceeds_ghost +=
+      search_exceeds_ghost ? 1 : 0;
+    bhrepos_summary_search_truncated_by_grid +=
+      search_truncated_by_grid ? 1 : 0;
+    bhrepos_summary_effective_search_truncated_by_grid +=
+      effective_search_truncated_by_grid ? 1 : 0;
+    bhrepos_summary_under_resolved +=
+      (search_radius_over_dx < 1.5) ? 1 : 0;
+    bhrepos_summary_no_effective_target +=
+      (!effective_active_target_exists) ? 1 : 0;
+    bhrepos_summary_max_displacement_cells =
+      max(bhrepos_summary_max_displacement_cells, displacement_cells);
+    bhrepos_summary_max_effective_active_peak_offset_kpc =
+      max(bhrepos_summary_max_effective_active_peak_offset_kpc,
+          effective_active_offset_kpc);
+
+    if (BHRepositionVerbose >= 2) {
+      fprintf(logptr,
+              "[BHREPOS] processor=%d invocation_seq=%d grid_id=%d "
+              "step=%d level=%d z=%.8g bh_id=%lld "
+              "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
+              "bh_density=%.8e "
+              "diag_peak_pos_x=%.15g diag_peak_pos_y=%.15g diag_peak_pos_z=%.15g "
+              "diag_peak_density=%.8e diag_peak_in_ghost=%d diag_peak_offset_kpc=%.8g "
+              "active_peak_pos_x=%.15g active_peak_pos_y=%.15g active_peak_pos_z=%.15g "
+              "active_peak_density=%.8e active_peak_offset_kpc=%.8g active_target_exists=%d "
+              "offset_from_potential_kpc=%.8g "
+              "displacement_kpc=%.8g displacement_cells=%.8g "
+              "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
+              "method=%d diagnostic_only=%d "
+              "search_exceeds_ghost=%d search_truncated_by_grid=%d "
+              "active_reposition_rejected=%d search_radius_over_dx=%.8g "
+              "under_resolved=%d "
+              "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f "
+              "effective_active_radius_cells=%.8g active_radius_was_capped=%d "
+              "effective_active_target_exists=%d "
+              "effective_active_peak_density=%.8e "
+              "effective_active_peak_offset_kpc=%.8g "
+              "effective_search_truncated_by_grid=%d "
+              "effective_reposition_rejected=%d rejection_reason=%d\n",
+              bhrepos_processor, bhrepos_invocation_seq, bhrepos_grid_id,
+              cycle_number, level, zred, (long long) ParticleNumber[p],
+              bh_pos[0], bh_pos[1], bh_pos[2],
+              bh_density,
+              diag_peak_pos[0], diag_peak_pos[1], diag_peak_pos[2],
+              diag_peak_density, diag_peak_in_ghost, diag_offset_kpc,
+              active_peak_pos[0], active_peak_pos[1], active_peak_pos[2],
+              active_peak_density, active_offset_kpc, active_target_exists,
+              offset_from_potential_kpc,
+              displacement_kpc, displacement_cells,
+              reposition_occurred, reposition_clamped, 0,
+              BHRepositionMethod, (BHRepositionMethod == 0) ? 1 : 0,
+              search_exceeds_ghost, search_truncated_by_grid,
+              active_reposition_rejected, search_radius_over_dx,
+              (search_radius_over_dx < 1.5) ? 1 : 0,
+              search_cells, search_active_cells, reposition_wall_ms,
+              effective_active_radius_cells, active_radius_was_capped,
+              effective_active_target_exists,
+              effective_active_peak_density,
+              effective_active_offset_kpc,
+              effective_search_truncated_by_grid,
+              effective_reposition_rejected, rejection_reason);
+      bhrepos_detail_rows_emitted++;
+    }
+  }
+
+  if (BHRepositionVerbose >= 1) {
     fprintf(logptr,
-            "[BHREPOS] step=%d level=%d z=%.8g bh_id=%lld "
-            "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
-            "bh_density=%.8e "
-            "diag_peak_pos_x=%.15g diag_peak_pos_y=%.15g diag_peak_pos_z=%.15g "
-            "diag_peak_density=%.8e diag_peak_in_ghost=%d diag_peak_offset_kpc=%.8g "
-            "active_peak_pos_x=%.15g active_peak_pos_y=%.15g active_peak_pos_z=%.15g "
-            "active_peak_density=%.8e active_peak_offset_kpc=%.8g active_target_exists=%d "
-            "offset_from_potential_kpc=%.8g "
-            "displacement_kpc=%.8g displacement_cells=%.8g "
-            "reposition_occurred=%d reposition_clamped=%d newly_seeded_skip=%d "
-            "search_cells=%d search_active_cells=%d reposition_wall_ms=%.4f "
-            "effective_active_radius_cells=%.8g active_radius_was_capped=%d "
-            "effective_active_target_exists=%d "
-            "effective_active_peak_density=%.8e "
-            "effective_active_peak_offset_kpc=%.8g "
-            "effective_search_truncated_by_grid=%d "
-            "effective_reposition_rejected=%d rejection_reason=%d\n",
-            cycle_number, level, zred, (long long) ParticleNumber[p],
-            bh_pos[0], bh_pos[1], bh_pos[2],
-            bh_density,
-            diag_peak_pos[0], diag_peak_pos[1], diag_peak_pos[2],
-            diag_peak_density, diag_peak_in_ghost, diag_offset_kpc,
-            active_peak_pos[0], active_peak_pos[1], active_peak_pos[2],
-            active_peak_density, active_offset_kpc, active_target_exists,
-            offset_from_potential_kpc,
-            displacement_kpc, displacement_cells,
-            reposition_occurred, reposition_clamped, 0,
-            search_cells, search_active_cells, reposition_wall_ms,
-            effective_active_radius_cells, active_radius_was_capped,
-            effective_active_target_exists,
-            effective_active_peak_density,
-            effective_active_offset_kpc,
-            effective_search_truncated_by_grid,
-            effective_reposition_rejected, rejection_reason);
+            "[BHREPOS_SUMMARY] schema_version=2 "
+            "processor=%d invocation_seq=%d grid_id=%d step=%d level=%d "
+            "rows=%d moved=%d method0_rows=%d diagnostic_only_rows=%d "
+            "active_radius_was_capped_count=%d "
+            "active_target_exists_count=%d "
+            "effective_active_target_exists_count=%d "
+            "effective_reposition_rejected_count=%d "
+            "legacy_active_reposition_rejected_count=%d "
+            "search_exceeds_ghost_count=%d "
+            "search_truncated_by_grid_count=%d "
+            "effective_search_truncated_by_grid_count=%d "
+            "under_resolved_count=%d no_effective_target_count=%d "
+            "newly_seeded_count=%d "
+            "max_displacement_cells=%.8g "
+            "max_effective_active_peak_offset_kpc=%.8g "
+            "max_search_radius_over_dx=%.8g "
+            "detail_rows_emitted=%d detail_rows_complete=%d\n",
+            bhrepos_processor, bhrepos_invocation_seq, bhrepos_grid_id,
+            cycle_number, level,
+            bhrepos_summary_rows, bhrepos_summary_moved,
+            bhrepos_summary_method0_rows,
+            bhrepos_summary_diagnostic_only_rows,
+            bhrepos_summary_active_radius_was_capped,
+            bhrepos_summary_active_target_exists,
+            bhrepos_summary_effective_active_target_exists,
+            bhrepos_summary_effective_reposition_rejected,
+            bhrepos_summary_legacy_active_reposition_rejected,
+            bhrepos_summary_search_exceeds_ghost,
+            bhrepos_summary_search_truncated_by_grid,
+            bhrepos_summary_effective_search_truncated_by_grid,
+            bhrepos_summary_under_resolved,
+            bhrepos_summary_no_effective_target,
+            bhrepos_summary_newly_seeded,
+            bhrepos_summary_max_displacement_cells,
+            bhrepos_summary_max_effective_active_peak_offset_kpc,
+            bhrepos_summary_max_search_radius_over_dx,
+            bhrepos_detail_rows_emitted,
+            bhrepos_detail_rows_complete);
   }
 
   return SUCCESS;
