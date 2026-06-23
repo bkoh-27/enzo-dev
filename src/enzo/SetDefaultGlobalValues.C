@@ -775,6 +775,12 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHRepositionDiagnosePotential    = 0;      // optional potential-min offset
   BHRepositionVerbose              = 1;
 
+  BHDynamicalFrictionMethod          = 0;    // off
+  BHDynamicalFrictionVerbose         = 0;    // no logging by default
+  BHDynamicalFrictionKernelRadius    = 1.0;  // physical kpc
+  BHDynamicalFrictionMinParticles    = 8;    // min DM neighbors
+  BHDynamicalFrictionMinSlowParticles = 2;   // min slow DM neighbors
+
   BHAccretionMethod                = 0;      // opt-in new BH accretion path
   BHAccretionKernelRadius          = 3.0;    // physical kpc
   BHAccretionRemovalRadius         = 1;      // Phase B active (cell widths)

@@ -1138,6 +1138,17 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
                   &BHRepositionDiagnosePotential);
     ret += sscanf(line, "BHRepositionVerbose = %"ISYM, &BHRepositionVerbose);
 
+    ret += sscanf(line, "BHDynamicalFrictionMethod = %"ISYM,
+                  &BHDynamicalFrictionMethod);
+    ret += sscanf(line, "BHDynamicalFrictionVerbose = %"ISYM,
+                  &BHDynamicalFrictionVerbose);
+    ret += sscanf(line, "BHDynamicalFrictionKernelRadius = %"FSYM,
+                  &BHDynamicalFrictionKernelRadius);
+    ret += sscanf(line, "BHDynamicalFrictionMinParticles = %"ISYM,
+                  &BHDynamicalFrictionMinParticles);
+    ret += sscanf(line, "BHDynamicalFrictionMinSlowParticles = %"ISYM,
+                  &BHDynamicalFrictionMinSlowParticles);
+
     ret += sscanf(line, "BHAccretionMethod = %"ISYM, &BHAccretionMethod);
     ret += sscanf(line, "BHAccretionKernelRadius = %"FSYM,
 		  &BHAccretionKernelRadius);
@@ -2274,6 +2285,18 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ENZO_FAIL("BHRepositionMaxDisplacement must be non-negative (units: cell widths).");
   if (BHRepositionDiagnosePotential != 0 && BHRepositionDiagnosePotential != 1)
     ENZO_FAIL("BHRepositionDiagnosePotential must be 0 or 1.");
+
+  if (BHDynamicalFrictionMethod < 0 || BHDynamicalFrictionMethod > 1)
+    ENZO_FAIL("BHDynamicalFrictionMethod must be 0 (off) or 1 (diagnostics-only).");
+  if (BHDynamicalFrictionVerbose < 0 || BHDynamicalFrictionVerbose > 2)
+    ENZO_FAIL("BHDynamicalFrictionVerbose must be 0, 1, or 2.");
+  if (BHDynamicalFrictionMethod > 0 &&
+      BHDynamicalFrictionKernelRadius <= 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionKernelRadius must be positive (units: physical kpc).");
+  if (BHDynamicalFrictionMinParticles < 1)
+    ENZO_FAIL("BHDynamicalFrictionMinParticles must be >= 1.");
+  if (BHDynamicalFrictionMinSlowParticles < 1)
+    ENZO_FAIL("BHDynamicalFrictionMinSlowParticles must be >= 1.");
 
   if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
     ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics/source path).");

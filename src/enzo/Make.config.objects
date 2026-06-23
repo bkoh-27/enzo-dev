@@ -655,6 +655,7 @@ OBJS_CONFIG_LIB = \
         Grid_BHFeedbackHandler.o \
         Grid_BHRepositionHandler.o \
         Grid_BHSeedHandler.o \
+        Grid_BHDynamicalFrictionHandler.o \
         Grid_MBHMaker2Handler.o \
 		Grid_StratifiedMediumExplosionInitialize.o \
         Grid_SupernovaRestartInitialize.o \

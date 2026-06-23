@@ -2633,6 +2633,8 @@ int zEulerSweep(int j, int NumberOfSubgrids, fluxes *SubgridFluxes[],
                        float dtLevelAbove);
   int BHRepositionDiagnosticHandler(HierarchyEntry* SubgridPointer, int level,
                                     int cycle_number, float dtLevelAbove);
+  int BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer, int level,
+                                 int cycle_number, float dtLevelAbove);
   int BHAccretionDiagnosticHandler(HierarchyEntry* SubgridPointer, int level,
                                    int cycle_number, float dtLevelAbove);
   int BHFeedbackHandler(HierarchyEntry* SubgridPointer, int level,

@@ -1147,6 +1147,13 @@ EXTERN float BHRepositionMaxDisplacement;        // parsed for Phase B (cell wid
 EXTERN int   BHRepositionDiagnosePotential;      // optional potential-min offset
 EXTERN int   BHRepositionVerbose;                // logging verbosity
 
+/* BH dynamical-friction diagnostics (Phase DF-0) */
+EXTERN int   BHDynamicalFrictionMethod;          // 0=off, 1=diagnostics-only
+EXTERN int   BHDynamicalFrictionVerbose;         // 0=none, 1=summary/warn, 2=detail
+EXTERN float BHDynamicalFrictionKernelRadius;    // physical kpc
+EXTERN int   BHDynamicalFrictionMinParticles;    // min DM particles in kernel
+EXTERN int   BHDynamicalFrictionMinSlowParticles;// min slow DM particles
+
 /* BH accretion diagnostics (Phase A) */
 EXTERN int   BHAccretionMethod;                  // 0=off, 1=two-channel diagnostics
 EXTERN float BHAccretionKernelRadius;            // physical kpc

@@ -1110,6 +1110,17 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
           BHRepositionDiagnosePotential);
   fprintf(fptr, "BHRepositionVerbose         = %"ISYM"\n\n", BHRepositionVerbose);
 
+  fprintf(fptr, "BHDynamicalFrictionMethod          = %"ISYM"\n",
+          BHDynamicalFrictionMethod);
+  fprintf(fptr, "BHDynamicalFrictionVerbose         = %"ISYM"\n",
+          BHDynamicalFrictionVerbose);
+  fprintf(fptr, "BHDynamicalFrictionKernelRadius    = %"GOUTSYM"  # physical kpc\n",
+          BHDynamicalFrictionKernelRadius);
+  fprintf(fptr, "BHDynamicalFrictionMinParticles    = %"ISYM"\n",
+          BHDynamicalFrictionMinParticles);
+  fprintf(fptr, "BHDynamicalFrictionMinSlowParticles = %"ISYM"\n\n",
+          BHDynamicalFrictionMinSlowParticles);
+
   fprintf(fptr, "BHAccretionMethod           = %"ISYM"\n", BHAccretionMethod);
   fprintf(fptr, "BHAccretionKernelRadius     = %"GOUTSYM"  # physical kpc\n",
           BHAccretionKernelRadius);
