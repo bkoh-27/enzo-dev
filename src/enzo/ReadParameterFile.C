@@ -1148,6 +1148,48 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
                   &BHDynamicalFrictionMinParticles);
     ret += sscanf(line, "BHDynamicalFrictionMinSlowParticles = %"ISYM,
                   &BHDynamicalFrictionMinSlowParticles);
+    ret += sscanf(line, "BHDynamicalFrictionActiveApply = %"ISYM,
+                  &BHDynamicalFrictionActiveApply);
+    ret += sscanf(line, "BHDynamicalFrictionActiveSchemaVersion = %"ISYM,
+                  &BHDynamicalFrictionActiveSchemaVersion);
+    ret += sscanf(line, "BHDynamicalFrictionActiveVerbose = %"ISYM,
+                  &BHDynamicalFrictionActiveVerbose);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMaxKickFraction = %"FSYM,
+                  &BHDynamicalFrictionActiveMaxKickFraction);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMaxLevelKickFraction = %"FSYM,
+                  &BHDynamicalFrictionActiveMaxLevelKickFraction);
+    ret += sscanf(line, "BHDynamicalFrictionActiveUseSubcycling = %"ISYM,
+                  &BHDynamicalFrictionActiveUseSubcycling);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMaxSubcycles = %"ISYM,
+                  &BHDynamicalFrictionActiveMaxSubcycles);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMaxDtOverDtDF = %"FSYM,
+                  &BHDynamicalFrictionActiveMaxDtOverDtDF);
+    ret += sscanf(line, "BHDynamicalFrictionActiveRequireKernelComplete = %"ISYM,
+                  &BHDynamicalFrictionActiveRequireKernelComplete);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMinParticles = %"ISYM,
+                  &BHDynamicalFrictionActiveMinParticles);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMinSlowParticles = %"ISYM,
+                  &BHDynamicalFrictionActiveMinSlowParticles);
+    ret += sscanf(line, "BHDynamicalFrictionActiveVrelFloorKmS = %"FSYM,
+                  &BHDynamicalFrictionActiveVrelFloorKmS);
+    ret += sscanf(line, "BHDynamicalFrictionActiveSigmaFloorKmS = %"FSYM,
+                  &BHDynamicalFrictionActiveSigmaFloorKmS);
+    ret += sscanf(line, "BHDynamicalFrictionActiveLnLambdaMax = %"FSYM,
+                  &BHDynamicalFrictionActiveLnLambdaMax);
+    ret += sscanf(line, "BHDynamicalFrictionActiveRequireLocalGravity = %"ISYM,
+                  &BHDynamicalFrictionActiveRequireLocalGravity);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMaxADFOverAGrav = %"FSYM,
+                  &BHDynamicalFrictionActiveMaxADFOverAGrav);
+    ret += sscanf(line, "BHDynamicalFrictionActiveMomentumPolicy = %"ISYM,
+                  &BHDynamicalFrictionActiveMomentumPolicy);
+    ret += sscanf(line, "BHDynamicalFrictionActiveSuppressNewSeeds = %"ISYM,
+                  &BHDynamicalFrictionActiveSuppressNewSeeds);
+    ret += sscanf(line, "BHDynamicalFrictionActiveSuppressRepositionConflict = %"ISYM,
+                  &BHDynamicalFrictionActiveSuppressRepositionConflict);
+
+    if (line[0] != '#' &&
+        strstr(line, "BHDynamicalFrictionActiveKernelMode") != NULL)
+      ENZO_FAIL("BHDynamicalFrictionActiveKernelMode is deferred and is not accepted in ADF-SOURCE-SKELETON-0A.");
 
     ret += sscanf(line, "BHAccretionMethod = %"ISYM, &BHAccretionMethod);
     ret += sscanf(line, "BHAccretionKernelRadius = %"FSYM,
@@ -2286,8 +2328,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHRepositionDiagnosePotential != 0 && BHRepositionDiagnosePotential != 1)
     ENZO_FAIL("BHRepositionDiagnosePotential must be 0 or 1.");
 
-  if (BHDynamicalFrictionMethod < 0 || BHDynamicalFrictionMethod > 1)
-    ENZO_FAIL("BHDynamicalFrictionMethod must be 0 (off) or 1 (diagnostics-only).");
+  if (BHDynamicalFrictionMethod < 0 || BHDynamicalFrictionMethod > 2)
+    ENZO_FAIL("BHDynamicalFrictionMethod must be 0 (off), 1 (diagnostics-only), or 2 (active skeleton dry-run/no-kick).");
   if (BHDynamicalFrictionVerbose < 0 || BHDynamicalFrictionVerbose > 2)
     ENZO_FAIL("BHDynamicalFrictionVerbose must be 0, 1, or 2.");
   if (BHDynamicalFrictionMethod > 0 &&
@@ -2297,6 +2339,56 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
     ENZO_FAIL("BHDynamicalFrictionMinParticles must be >= 1.");
   if (BHDynamicalFrictionMinSlowParticles < 1)
     ENZO_FAIL("BHDynamicalFrictionMinSlowParticles must be >= 1.");
+  if (BHDynamicalFrictionActiveApply != 0)
+    ENZO_FAIL("BHDynamicalFrictionActiveApply must be 0 in ADF-SOURCE-SKELETON-0A.");
+  if (BHDynamicalFrictionActiveSchemaVersion != 2)
+    ENZO_FAIL("BHDynamicalFrictionActiveSchemaVersion must be 2.");
+  if (BHDynamicalFrictionActiveVerbose < 0 ||
+      BHDynamicalFrictionActiveVerbose > 2)
+    ENZO_FAIL("BHDynamicalFrictionActiveVerbose must be 0, 1, or 2.");
+  if (BHDynamicalFrictionActiveMaxKickFraction <= 0.0f ||
+      BHDynamicalFrictionActiveMaxKickFraction > 0.5f)
+    ENZO_FAIL("BHDynamicalFrictionActiveMaxKickFraction must be > 0 and <= 0.5.");
+  if (BHDynamicalFrictionActiveMaxLevelKickFraction <= 0.0f ||
+      BHDynamicalFrictionActiveMaxLevelKickFraction > 0.5f ||
+      BHDynamicalFrictionActiveMaxLevelKickFraction <
+      BHDynamicalFrictionActiveMaxKickFraction)
+    ENZO_FAIL("BHDynamicalFrictionActiveMaxLevelKickFraction must be > 0, <= 0.5, and >= BHDynamicalFrictionActiveMaxKickFraction.");
+  if (BHDynamicalFrictionActiveUseSubcycling != 0 &&
+      BHDynamicalFrictionActiveUseSubcycling != 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveUseSubcycling must be 0 or 1.");
+  if (BHDynamicalFrictionActiveMaxSubcycles < 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveMaxSubcycles must be >= 1.");
+  if (BHDynamicalFrictionActiveMaxDtOverDtDF <= 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionActiveMaxDtOverDtDF must be positive.");
+  if (BHDynamicalFrictionActiveRequireKernelComplete != 0 &&
+      BHDynamicalFrictionActiveRequireKernelComplete != 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveRequireKernelComplete must be 0 or 1.");
+  if (BHDynamicalFrictionActiveMinParticles < BHDynamicalFrictionMinParticles)
+    ENZO_FAIL("BHDynamicalFrictionActiveMinParticles must be >= BHDynamicalFrictionMinParticles.");
+  if (BHDynamicalFrictionActiveMinSlowParticles <
+      BHDynamicalFrictionMinSlowParticles)
+    ENZO_FAIL("BHDynamicalFrictionActiveMinSlowParticles must be >= BHDynamicalFrictionMinSlowParticles.");
+  if (BHDynamicalFrictionActiveVrelFloorKmS < 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionActiveVrelFloorKmS must be non-negative.");
+  if (BHDynamicalFrictionActiveSigmaFloorKmS < 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionActiveSigmaFloorKmS must be non-negative.");
+  if (BHDynamicalFrictionActiveLnLambdaMax != -1.0f &&
+      BHDynamicalFrictionActiveLnLambdaMax <= 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionActiveLnLambdaMax must be -1 or positive.");
+  if (BHDynamicalFrictionActiveRequireLocalGravity != 0 &&
+      BHDynamicalFrictionActiveRequireLocalGravity != 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveRequireLocalGravity must be 0 or 1.");
+  if (BHDynamicalFrictionActiveMaxADFOverAGrav <= 0.0f)
+    ENZO_FAIL("BHDynamicalFrictionActiveMaxADFOverAGrav must be positive.");
+  if (BHDynamicalFrictionActiveMomentumPolicy != 0)
+    ENZO_FAIL("BHDynamicalFrictionActiveMomentumPolicy must be 0 (bh_only) in ADF-SOURCE-SKELETON-0A.");
+  if (BHDynamicalFrictionActiveSuppressNewSeeds != 0 &&
+      BHDynamicalFrictionActiveSuppressNewSeeds != 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveSuppressNewSeeds must be 0 or 1.");
+  if (BHDynamicalFrictionActiveSuppressRepositionConflict != 0 &&
+      BHDynamicalFrictionActiveSuppressRepositionConflict != 1)
+    ENZO_FAIL("BHDynamicalFrictionActiveSuppressRepositionConflict must be 0 or 1.");
 
   if (BHAccretionMethod != 0 && BHAccretionMethod != 1)
     ENZO_FAIL("BHAccretionMethod must be 0 (off) or 1 (two-channel diagnostics/source path).");

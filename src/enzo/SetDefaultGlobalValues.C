@@ -780,6 +780,25 @@ int SetDefaultGlobalValues(TopGridData &MetaData)
   BHDynamicalFrictionKernelRadius    = 1.0;  // physical kpc
   BHDynamicalFrictionMinParticles    = 8;    // min DM neighbors
   BHDynamicalFrictionMinSlowParticles = 2;   // min slow DM neighbors
+  BHDynamicalFrictionActiveApply     = 0;    // no active kicks in 0A
+  BHDynamicalFrictionActiveSchemaVersion = 2;
+  BHDynamicalFrictionActiveVerbose   = 2;
+  BHDynamicalFrictionActiveMaxKickFraction = 0.01;
+  BHDynamicalFrictionActiveMaxLevelKickFraction = 0.05;
+  BHDynamicalFrictionActiveUseSubcycling = 1;
+  BHDynamicalFrictionActiveMaxSubcycles = 64;
+  BHDynamicalFrictionActiveMaxDtOverDtDF = 10.0;
+  BHDynamicalFrictionActiveRequireKernelComplete = 1;
+  BHDynamicalFrictionActiveMinParticles = 64;
+  BHDynamicalFrictionActiveMinSlowParticles = 16;
+  BHDynamicalFrictionActiveVrelFloorKmS = 0.0;
+  BHDynamicalFrictionActiveSigmaFloorKmS = 0.0;
+  BHDynamicalFrictionActiveLnLambdaMax = -1.0;
+  BHDynamicalFrictionActiveRequireLocalGravity = 1;
+  BHDynamicalFrictionActiveMaxADFOverAGrav = 0.1;
+  BHDynamicalFrictionActiveMomentumPolicy = 0; // bh_only
+  BHDynamicalFrictionActiveSuppressNewSeeds = 1;
+  BHDynamicalFrictionActiveSuppressRepositionConflict = 1;
 
   BHAccretionMethod                = 0;      // opt-in new BH accretion path
   BHAccretionKernelRadius          = 3.0;    // physical kpc

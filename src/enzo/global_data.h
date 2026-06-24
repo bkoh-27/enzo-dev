@@ -1148,11 +1148,32 @@ EXTERN int   BHRepositionDiagnosePotential;      // optional potential-min offse
 EXTERN int   BHRepositionVerbose;                // logging verbosity
 
 /* BH dynamical-friction diagnostics (Phase DF-0) */
-EXTERN int   BHDynamicalFrictionMethod;          // 0=off, 1=diagnostics-only
+EXTERN int   BHDynamicalFrictionMethod;          // 0=off, 1=diagnostics-only, 2=active skeleton
 EXTERN int   BHDynamicalFrictionVerbose;         // 0=none, 1=summary/warn, 2=detail
 EXTERN float BHDynamicalFrictionKernelRadius;    // physical kpc
 EXTERN int   BHDynamicalFrictionMinParticles;    // min DM particles in kernel
 EXTERN int   BHDynamicalFrictionMinSlowParticles;// min slow DM particles
+
+/* BH dynamical-friction active skeleton controls (ADF-SOURCE-SKELETON-0A) */
+EXTERN int   BHDynamicalFrictionActiveApply;     // 0 only in 0A
+EXTERN int   BHDynamicalFrictionActiveSchemaVersion;
+EXTERN int   BHDynamicalFrictionActiveVerbose;
+EXTERN float BHDynamicalFrictionActiveMaxKickFraction;
+EXTERN float BHDynamicalFrictionActiveMaxLevelKickFraction;
+EXTERN int   BHDynamicalFrictionActiveUseSubcycling;
+EXTERN int   BHDynamicalFrictionActiveMaxSubcycles;
+EXTERN float BHDynamicalFrictionActiveMaxDtOverDtDF;
+EXTERN int   BHDynamicalFrictionActiveRequireKernelComplete;
+EXTERN int   BHDynamicalFrictionActiveMinParticles;
+EXTERN int   BHDynamicalFrictionActiveMinSlowParticles;
+EXTERN float BHDynamicalFrictionActiveVrelFloorKmS;
+EXTERN float BHDynamicalFrictionActiveSigmaFloorKmS;
+EXTERN float BHDynamicalFrictionActiveLnLambdaMax;
+EXTERN int   BHDynamicalFrictionActiveRequireLocalGravity;
+EXTERN float BHDynamicalFrictionActiveMaxADFOverAGrav;
+EXTERN int   BHDynamicalFrictionActiveMomentumPolicy;
+EXTERN int   BHDynamicalFrictionActiveSuppressNewSeeds;
+EXTERN int   BHDynamicalFrictionActiveSuppressRepositionConflict;
 
 /* BH accretion diagnostics (Phase A) */
 EXTERN int   BHAccretionMethod;                  // 0=off, 1=two-channel diagnostics

@@ -1118,8 +1118,46 @@ int WriteParameterFile(FILE *fptr, TopGridData &MetaData, char *name = NULL)
           BHDynamicalFrictionKernelRadius);
   fprintf(fptr, "BHDynamicalFrictionMinParticles    = %"ISYM"\n",
           BHDynamicalFrictionMinParticles);
-  fprintf(fptr, "BHDynamicalFrictionMinSlowParticles = %"ISYM"\n\n",
+  fprintf(fptr, "BHDynamicalFrictionMinSlowParticles = %"ISYM"\n",
           BHDynamicalFrictionMinSlowParticles);
+  fprintf(fptr, "BHDynamicalFrictionActiveApply = %"ISYM"\n",
+          BHDynamicalFrictionActiveApply);
+  fprintf(fptr, "BHDynamicalFrictionActiveSchemaVersion = %"ISYM"\n",
+          BHDynamicalFrictionActiveSchemaVersion);
+  fprintf(fptr, "BHDynamicalFrictionActiveVerbose = %"ISYM"\n",
+          BHDynamicalFrictionActiveVerbose);
+  fprintf(fptr, "BHDynamicalFrictionActiveMaxKickFraction = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveMaxKickFraction);
+  fprintf(fptr, "BHDynamicalFrictionActiveMaxLevelKickFraction = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveMaxLevelKickFraction);
+  fprintf(fptr, "BHDynamicalFrictionActiveUseSubcycling = %"ISYM"\n",
+          BHDynamicalFrictionActiveUseSubcycling);
+  fprintf(fptr, "BHDynamicalFrictionActiveMaxSubcycles = %"ISYM"\n",
+          BHDynamicalFrictionActiveMaxSubcycles);
+  fprintf(fptr, "BHDynamicalFrictionActiveMaxDtOverDtDF = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveMaxDtOverDtDF);
+  fprintf(fptr, "BHDynamicalFrictionActiveRequireKernelComplete = %"ISYM"\n",
+          BHDynamicalFrictionActiveRequireKernelComplete);
+  fprintf(fptr, "BHDynamicalFrictionActiveMinParticles = %"ISYM"\n",
+          BHDynamicalFrictionActiveMinParticles);
+  fprintf(fptr, "BHDynamicalFrictionActiveMinSlowParticles = %"ISYM"\n",
+          BHDynamicalFrictionActiveMinSlowParticles);
+  fprintf(fptr, "BHDynamicalFrictionActiveVrelFloorKmS = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveVrelFloorKmS);
+  fprintf(fptr, "BHDynamicalFrictionActiveSigmaFloorKmS = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveSigmaFloorKmS);
+  fprintf(fptr, "BHDynamicalFrictionActiveLnLambdaMax = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveLnLambdaMax);
+  fprintf(fptr, "BHDynamicalFrictionActiveRequireLocalGravity = %"ISYM"\n",
+          BHDynamicalFrictionActiveRequireLocalGravity);
+  fprintf(fptr, "BHDynamicalFrictionActiveMaxADFOverAGrav = %"GOUTSYM"\n",
+          BHDynamicalFrictionActiveMaxADFOverAGrav);
+  fprintf(fptr, "BHDynamicalFrictionActiveMomentumPolicy = %"ISYM"\n",
+          BHDynamicalFrictionActiveMomentumPolicy);
+  fprintf(fptr, "BHDynamicalFrictionActiveSuppressNewSeeds = %"ISYM"\n",
+          BHDynamicalFrictionActiveSuppressNewSeeds);
+  fprintf(fptr, "BHDynamicalFrictionActiveSuppressRepositionConflict = %"ISYM"\n\n",
+          BHDynamicalFrictionActiveSuppressRepositionConflict);
 
   fprintf(fptr, "BHAccretionMethod           = %"ISYM"\n", BHAccretionMethod);
   fprintf(fptr, "BHAccretionKernelRadius     = %"GOUTSYM"  # physical kpc\n",

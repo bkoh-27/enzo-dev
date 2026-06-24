@@ -342,6 +342,9 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
   if (MyProcessorNumber != ProcessorNumber)
     return SUCCESS;
 
+  if (BHDynamicalFrictionMethod == 2)
+    return SUCCESS;
+
   if (NumberOfParticles <= 0)
     return SUCCESS;
 
