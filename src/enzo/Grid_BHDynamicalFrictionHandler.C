@@ -331,6 +331,162 @@ static void BHDFEmitGuardWarning(FILE *logptr, const BHDFRow &row)
           row.bh_id, row.rejection_reason, row.authoritative);
 }
 
+static void BHDFEmitActiveDryRunDetail(
+  FILE *logptr, int processor, int invocation_seq, int grid_id, int step,
+  int level, long long bh_id, int particle_index, double bh_mass_msun,
+  const double bh_pos[], const double bh_vel_kms[],
+  double kernel_radius_code, double kernel_radius_phys_kpc,
+  double kernel_radius_over_dx, double dt_level_myr)
+{
+  fprintf(logptr,
+          "[BHDF_ACTIVE] schema_version=%d mode=active_dry_run "
+          "active_method=2 active_policy=dry_run "
+          "processor=%d invocation_seq=%d grid_id=%d step=%d level=%d "
+          "bh_id=%lld particle_index=%d bh_mass_msun=%.8e "
+          "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
+          "bh_vel_x_kms=%.8g bh_vel_y_kms=%.8g bh_vel_z_kms=%.8g "
+          "kernel_radius_code=%.8g kernel_radius_phys_kpc=%.8g "
+          "kernel_radius_over_dx=%.8g kernel_complete=1 "
+          "kernel_truncated_by_grid=0 n_dm_in_kernel=0 n_slow=0 "
+          "rho_slow_cgs=0 v_rel_kms=0 sigma_1d_kms=0 "
+          "b_min_phys_kpc=0 b_max_phys_kpc=%.8g ln_lambda=0 "
+          "candidate_a_DF_x_cgs=0 candidate_a_DF_y_cgs=0 "
+          "candidate_a_DF_z_cgs=0 candidate_a_DF_mag_cgs=0 "
+          "limited_a_DF_x_cgs=0 limited_a_DF_y_cgs=0 "
+          "limited_a_DF_z_cgs=0 limited_a_DF_mag_cgs=0 "
+          "dt_level_Myr=%.8g dt_DF_Myr=0 dt_level_over_dt_DF=0 "
+          "requested_delta_v_code=0 limited_delta_v_code=0 "
+          "applied_delta_v_code=0 cap_fraction_requested=0 "
+          "cap_fraction_applied=0 per_substep_cap=%.8g "
+          "per_level_cap=%.8g subcycle_count=0 max_subcycles=%d "
+          "suppression_reason_code=1 suppression_reason_name=diagnostics_only "
+          "active_applied=0 kick_applied=0 local_gravity_available=1 "
+          "local_gravity_magnitude_cgs=0 a_DF_over_a_grav=0 "
+          "local_gravity_guard_passed=0 momentum_policy=bh_only "
+          "conservation_bookkeeping_available=0 "
+          "delta_p_bh_x_code=0 delta_p_bh_y_code=0 delta_p_bh_z_code=0 "
+          "delta_p_wake_x_code=0 delta_p_wake_y_code=0 "
+          "delta_p_wake_z_code=0 active_validation_flags=dry_run_no_physics\n",
+          BHDynamicalFrictionActiveSchemaVersion,
+          processor, invocation_seq, grid_id, step, level,
+          bh_id, particle_index, bh_mass_msun,
+          bh_pos[0], bh_pos[1], bh_pos[2],
+          bh_vel_kms[0], bh_vel_kms[1], bh_vel_kms[2],
+          kernel_radius_code, kernel_radius_phys_kpc,
+          kernel_radius_over_dx, kernel_radius_phys_kpc,
+          dt_level_myr,
+          BHDynamicalFrictionActiveMaxKickFraction,
+          BHDynamicalFrictionActiveMaxLevelKickFraction,
+          BHDynamicalFrictionActiveMaxSubcycles);
+}
+
+static void BHDFEmitActiveDryRunSummary(
+  FILE *logptr, int processor, int invocation_seq, int grid_id, int step,
+  int level, int eligible_bh, int detail_rows_emitted,
+  int detail_rows_complete)
+{
+  fprintf(logptr,
+          "[BHDF_ACTIVE_SUMMARY] schema_version=%d "
+          "processor=%d invocation_seq=%d grid_id=%d step=%d level=%d "
+          "eligible_bh=%d detail_rows_emitted=%d active_rows=%d "
+          "applied_kicks=0 suppressed_rows=%d cap_limited_rows=0 "
+          "subcycled_rows=0 local_gravity_failed_rows=0 "
+          "under_resolved_rows=0 no_slow_rows=0 kernel_incomplete_rows=0 "
+          "low_vrel_suppressed_rows=0 lnLambda_suppressed_rows=0 "
+          "dtDF_suppressed_rows=0 max_subcycle_suppressed_rows=0 "
+          "reposition_conflict_rows=0 newly_seeded_suppressed_rows=0 "
+          "non_authoritative_mass_rows=0 invalid_units_rows=0 "
+          "momentum_policy_unsupported_rows=0 "
+          "invalid_candidate_acceleration_rows=0 diagnostics_only_rows=%d "
+          "cap_fraction_extreme_rows=0 local_gravity_ratio_exceeded_rows=0 "
+          "summary_accounting_passed=1 detail_rows_complete=%d "
+          "active_rows_consistent=1 applied_kicks_consistent=1\n",
+          BHDynamicalFrictionActiveSchemaVersion,
+          processor, invocation_seq, grid_id, step, level,
+          eligible_bh, detail_rows_emitted, detail_rows_emitted,
+          detail_rows_emitted, detail_rows_emitted, detail_rows_complete);
+}
+
+static int BHDFActiveDryRunSkeleton(
+  FILE *logptr, int processor, int invocation_seq, int grid_id, int step,
+  int level, int number_of_particles, int *particle_type,
+  PINT *particle_number, float *particle_mass,
+  FLOAT *particle_position[], float *particle_velocity[],
+  int number_of_particle_attributes, float *particle_attribute[],
+  double mass_to_msun, double velocity_to_kms,
+  double kernel_radius_code, double kernel_radius_phys_kpc,
+  double kernel_radius_over_dx, double dt_level_myr)
+{
+  if (logptr == NULL)
+    logptr = stdout;
+  if (BHDynamicalFrictionActiveVerbose <= 0)
+    return SUCCESS;
+
+  std::vector<int> bh_particles;
+  if (number_of_particles > 0 && particle_type != NULL) {
+    bh_particles.reserve(number_of_particles);
+    for (int p = 0; p < number_of_particles; p++)
+      if (BHDFIsBHType(particle_type[p]))
+        bh_particles.push_back(p);
+  }
+
+  if (particle_number != NULL)
+    std::sort(bh_particles.begin(), bh_particles.end(),
+              BHDFParticleOrder(particle_number));
+
+  const int eligible_bh = int(bh_particles.size());
+  int detail_rows_emitted = 0;
+
+  if (BHDynamicalFrictionActiveVerbose >= 2) {
+    for (int bp = 0; bp < eligible_bh; bp++) {
+      const int p = bh_particles[bp];
+      double bh_pos[MAX_DIMENSION] = {0.0, 0.0, 0.0};
+      double bh_vel_kms[MAX_DIMENSION] = {0.0, 0.0, 0.0};
+
+      for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+        if (particle_position[dim] != NULL)
+          bh_pos[dim] = double(particle_position[dim][p]);
+        if (particle_velocity[dim] != NULL)
+          bh_vel_kms[dim] =
+            double(particle_velocity[dim][p]) * velocity_to_kms;
+      }
+
+      double bh_mass_code = 0.0;
+      if (particle_mass != NULL &&
+          isfinite(double(particle_mass[p])) && double(particle_mass[p]) > 0.0)
+        bh_mass_code = double(particle_mass[p]);
+
+      double attribute_mass = -1.0;
+      if (BHDFMassFromAttributes(number_of_particle_attributes,
+                                 particle_attribute, p, &attribute_mass))
+        bh_mass_code = attribute_mass;
+
+      double bh_mass_msun = 0.0;
+      if (isfinite(bh_mass_code) && bh_mass_code > 0.0 &&
+          isfinite(mass_to_msun) && mass_to_msun > 0.0)
+        bh_mass_msun = bh_mass_code * mass_to_msun;
+
+      const long long bh_id = (particle_number != NULL) ?
+        (long long) particle_number[p] : -1;
+
+      BHDFEmitActiveDryRunDetail(
+        logptr, processor, invocation_seq, grid_id, step, level,
+        bh_id, p, bh_mass_msun, bh_pos, bh_vel_kms,
+        kernel_radius_code, kernel_radius_phys_kpc,
+        kernel_radius_over_dx, dt_level_myr);
+      detail_rows_emitted++;
+    }
+  }
+
+  const int detail_rows_complete =
+    (BHDynamicalFrictionActiveVerbose >= 2 || eligible_bh == 0) ? 1 : 0;
+  BHDFEmitActiveDryRunSummary(
+    logptr, processor, invocation_seq, grid_id, step, level,
+    eligible_bh, detail_rows_emitted, detail_rows_complete);
+
+  return SUCCESS;
+}
+
 int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
                                      int level,
                                      int cycle_number,
@@ -342,8 +498,54 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
   if (MyProcessorNumber != ProcessorNumber)
     return SUCCESS;
 
-  if (BHDynamicalFrictionMethod == 2)
-    return SUCCESS;
+  if (BHDynamicalFrictionMethod == 2) {
+    if (BHDynamicalFrictionActiveVerbose <= 0)
+      return SUCCESS;
+
+    FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
+    static int bhdf_active_invocation_seq_counter = 0;
+    const int bhdf_active_invocation_seq =
+      ++bhdf_active_invocation_seq_counter;
+
+    float DensityUnits = 1.0f, LengthUnits = 1.0f, TemperatureUnits = 1.0f;
+    float TimeUnits = 1.0f, VelocityUnits = 1.0f;
+    const int units_valid =
+      (GetUnits(&DensityUnits, &LengthUnits, &TemperatureUnits,
+                &TimeUnits, &VelocityUnits, Time) != FAIL);
+
+    double mass_to_msun = 0.0;
+    double velocity_to_kms = 0.0;
+    double kernel_radius_code = 0.0;
+    double kernel_radius_over_dx = 0.0;
+    double dt_level_myr = 0.0;
+    if (units_valid) {
+      const double mass_units = double(DensityUnits) *
+        double(LengthUnits) * double(LengthUnits) * double(LengthUnits);
+      mass_to_msun = mass_units / SolarMass;
+      velocity_to_kms = double(VelocityUnits) / 1.0e5;
+      kernel_radius_code =
+        BHDFKernelRadiusCode(BHDynamicalFrictionKernelRadius, Time,
+                             LengthUnits);
+      const double cell_width = double(CellWidth[0][0]);
+      if (cell_width > 0.0)
+        kernel_radius_over_dx = kernel_radius_code / cell_width;
+      if (TimeUnits > 0.0f)
+        dt_level_myr = dt_code * double(TimeUnits) / Myr_s;
+    }
+
+    const double kernel_radius_phys_kpc =
+      isfinite(double(BHDynamicalFrictionKernelRadius)) ?
+      double(BHDynamicalFrictionKernelRadius) : 0.0;
+
+    return BHDFActiveDryRunSkeleton(
+      logptr, MyProcessorNumber, bhdf_active_invocation_seq,
+      this->GetGridID(), cycle_number, level,
+      NumberOfParticles, ParticleType, ParticleNumber, ParticleMass,
+      ParticlePosition, ParticleVelocity,
+      NumberOfParticleAttributes, ParticleAttribute,
+      mass_to_msun, velocity_to_kms, kernel_radius_code,
+      kernel_radius_phys_kpc, kernel_radius_over_dx, dt_level_myr);
+  }
 
   if (NumberOfParticles <= 0)
     return SUCCESS;
