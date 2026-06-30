@@ -331,12 +331,261 @@ static void BHDFEmitGuardWarning(FILE *logptr, const BHDFRow &row)
           row.bh_id, row.rejection_reason, row.authoritative);
 }
 
+struct BHDFCandidateResult {
+  int n_dm_in_kernel;
+  int n_slow;
+  double rho_slow_cgs;
+  double v_rel_kms;
+  double sigma_1d_kms;
+  double b_min_phys_kpc;
+  double b_max_phys_kpc;
+  double ln_lambda;
+  double candidate_a_DF_cgs[MAX_DIMENSION];
+  double candidate_a_DF_mag_cgs;
+  double dt_DF_Myr;
+  double dt_level_over_dt_DF;
+  double requested_delta_v_code;
+  double cap_fraction_requested;
+  int kernel_complete;
+  int kernel_truncated_by_grid;
+  int computed;
+};
+
+static void BHDFInitCandidateResult(BHDFCandidateResult *candidate,
+                                    double kernel_radius_phys_kpc)
+{
+  candidate->n_dm_in_kernel = 0;
+  candidate->n_slow = 0;
+  candidate->rho_slow_cgs = 0.0;
+  candidate->v_rel_kms = 0.0;
+  candidate->sigma_1d_kms = 0.0;
+  candidate->b_min_phys_kpc = 0.0;
+  candidate->b_max_phys_kpc =
+    (isfinite(kernel_radius_phys_kpc) && kernel_radius_phys_kpc > 0.0) ?
+    kernel_radius_phys_kpc : 0.0;
+  candidate->ln_lambda = 0.0;
+  for (int dim = 0; dim < MAX_DIMENSION; dim++)
+    candidate->candidate_a_DF_cgs[dim] = 0.0;
+  candidate->candidate_a_DF_mag_cgs = 0.0;
+  candidate->dt_DF_Myr = 0.0;
+  candidate->dt_level_over_dt_DF = 0.0;
+  candidate->requested_delta_v_code = 0.0;
+  candidate->cap_fraction_requested = 0.0;
+  candidate->kernel_complete = 1;
+  candidate->kernel_truncated_by_grid = 0;
+  candidate->computed = 0;
+}
+
+static BHDFCandidateResult BHDFDefaultCandidateWithKernel(
+  double kernel_radius_phys_kpc, int kernel_complete)
+{
+  BHDFCandidateResult candidate;
+  BHDFInitCandidateResult(&candidate, kernel_radius_phys_kpc);
+  candidate.kernel_complete = kernel_complete ? 1 : 0;
+  candidate.kernel_truncated_by_grid = candidate.kernel_complete ? 0 : 1;
+  return candidate;
+}
+
+static BHDFCandidateResult BHDFComputeCandidate(
+  int number_of_particles, int *particle_type, float *particle_mass,
+  FLOAT *particle_position[], float *particle_velocity[],
+  int bh_index, const double bh_pos[], double bh_mass_code,
+  double kernel_radius_code, double kernel_radius_phys_kpc,
+  double dt_level_myr, double mass_units, double length_units,
+  double velocity_units, const FLOAT *grid_left_edge,
+  const FLOAT *grid_right_edge)
+{
+  BHDFCandidateResult candidate;
+  BHDFInitCandidateResult(&candidate, kernel_radius_phys_kpc);
+
+  if (number_of_particles <= 0 || particle_type == NULL ||
+      particle_mass == NULL || particle_position == NULL ||
+      particle_velocity == NULL || bh_index < 0 ||
+      bh_index >= number_of_particles || !isfinite(bh_mass_code) ||
+      bh_mass_code <= 0.0 || !isfinite(kernel_radius_code) ||
+      kernel_radius_code <= 0.0 || !isfinite(kernel_radius_phys_kpc) ||
+      kernel_radius_phys_kpc <= 0.0 || !isfinite(mass_units) ||
+      mass_units <= 0.0 || !isfinite(length_units) ||
+      length_units <= 0.0 || !isfinite(velocity_units) ||
+      velocity_units <= 0.0)
+    return candidate;
+
+  for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+    if (particle_position[dim] == NULL || particle_velocity[dim] == NULL)
+      return candidate;
+  }
+
+  const double kernel_r2 = kernel_radius_code * kernel_radius_code;
+  const double radius_cgs = kernel_radius_code * length_units;
+  const double kernel_volume_cgs =
+    (4.0 * M_PI / 3.0) * radius_cgs * radius_cgs * radius_cgs;
+  const double b_max_phys_cm = candidate.b_max_phys_kpc * kpc_cm;
+
+  for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+    if (grid_left_edge != NULL && grid_right_edge != NULL &&
+        (bh_pos[dim] - kernel_radius_code < double(grid_left_edge[dim]) ||
+         bh_pos[dim] + kernel_radius_code > double(grid_right_edge[dim])))
+      candidate.kernel_complete = 0;
+  }
+  candidate.kernel_truncated_by_grid =
+    candidate.kernel_complete ? 0 : 1;
+  const int kernel_complete = candidate.kernel_complete;
+
+  double total_dm_mass = 0.0;
+  double mass_slow_code = 0.0;
+  double com_vel_code[MAX_DIMENSION] = {0.0, 0.0, 0.0};
+  std::vector<int> dm_neighbors;
+  dm_neighbors.reserve(number_of_particles);
+
+  for (int q = 0; q < number_of_particles; q++) {
+    double dr2 = 0.0;
+    for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+      const double dr = double(particle_position[dim][q]) - bh_pos[dim];
+      dr2 += dr * dr;
+    }
+    if (!isfinite(dr2))
+      continue;
+    if (dr2 > kernel_r2)
+      continue;
+
+    if (!BHDFIsDarkMatter(particle_type[q]))
+      continue;
+
+    const double dm_mass = double(particle_mass[q]);
+    if (!isfinite(dm_mass) || dm_mass <= 0.0)
+      continue;
+
+    candidate.n_dm_in_kernel++;
+    total_dm_mass += dm_mass;
+    dm_neighbors.push_back(q);
+    for (int dim = 0; dim < MAX_DIMENSION; dim++)
+      com_vel_code[dim] += dm_mass * double(particle_velocity[dim][q]);
+  }
+
+  if (total_dm_mass <= 0.0)
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+
+  for (int dim = 0; dim < MAX_DIMENSION; dim++)
+    com_vel_code[dim] /= total_dm_mass;
+
+  double v_rel_code_vec[MAX_DIMENSION] = {0.0, 0.0, 0.0};
+  double v_rel_code2 = 0.0;
+  for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+    v_rel_code_vec[dim] =
+      double(particle_velocity[dim][bh_index]) - com_vel_code[dim];
+    v_rel_code2 += v_rel_code_vec[dim] * v_rel_code_vec[dim];
+  }
+
+  if (!isfinite(v_rel_code2) || v_rel_code2 <= 0.0)
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+
+  const double v_rel_code = sqrt(v_rel_code2);
+  const double v_rel_cgs = v_rel_code * velocity_units;
+  candidate.v_rel_kms = v_rel_cgs / 1.0e5;
+
+  double sigma2_num = 0.0;
+  for (int ni = 0; ni < int(dm_neighbors.size()); ni++) {
+    const int q = dm_neighbors[ni];
+    const double dm_mass = double(particle_mass[q]);
+    double dv2 = 0.0;
+    for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+      const double dv = double(particle_velocity[dim][q]) - com_vel_code[dim];
+      dv2 += dv * dv;
+    }
+    if (!isfinite(dv2))
+      return BHDFDefaultCandidateWithKernel(
+        kernel_radius_phys_kpc, kernel_complete);
+    sigma2_num += dm_mass * dv2;
+    if (sqrt(dv2) < v_rel_code) {
+      candidate.n_slow++;
+      mass_slow_code += dm_mass;
+    }
+  }
+
+  if (!isfinite(sigma2_num) || sigma2_num < 0.0)
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+
+  const double sigma_1d_code = sqrt(sigma2_num / (3.0 * total_dm_mass));
+  if (!isfinite(sigma_1d_code))
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+  candidate.sigma_1d_kms = sigma_1d_code * velocity_units / 1.0e5;
+
+  if (kernel_volume_cgs > 0.0)
+    candidate.rho_slow_cgs = mass_slow_code * mass_units / kernel_volume_cgs;
+
+  const double bh_mass_cgs = bh_mass_code * mass_units;
+  const double sigma_1d_cgs = sigma_1d_code * velocity_units;
+  const double bmin_denom =
+    v_rel_cgs * v_rel_cgs + sigma_1d_cgs * sigma_1d_cgs;
+  if (bmin_denom > 0.0 && isfinite(bh_mass_cgs) && bh_mass_cgs > 0.0) {
+    const double b_min_phys_cm = GravConst * bh_mass_cgs / bmin_denom;
+    candidate.b_min_phys_kpc = b_min_phys_cm / kpc_cm;
+    if (b_min_phys_cm > 0.0 && b_min_phys_cm < b_max_phys_cm)
+      candidate.ln_lambda = log(b_max_phys_cm / b_min_phys_cm);
+  }
+
+  if (!isfinite(candidate.ln_lambda) || candidate.ln_lambda <= 0.0 ||
+      !isfinite(candidate.rho_slow_cgs) || candidate.rho_slow_cgs <= 0.0 ||
+      v_rel_cgs <= 0.0)
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+
+  const double prefactor =
+    -4.0 * M_PI * GravConst * GravConst * bh_mass_cgs *
+    candidate.rho_slow_cgs * candidate.ln_lambda /
+    (v_rel_cgs * v_rel_cgs * v_rel_cgs);
+  for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+    const double v_rel_dim_cgs = v_rel_code_vec[dim] * velocity_units;
+    candidate.candidate_a_DF_cgs[dim] = prefactor * v_rel_dim_cgs;
+    candidate.candidate_a_DF_mag_cgs +=
+      candidate.candidate_a_DF_cgs[dim] *
+      candidate.candidate_a_DF_cgs[dim];
+  }
+  candidate.candidate_a_DF_mag_cgs =
+    sqrt(candidate.candidate_a_DF_mag_cgs);
+
+  if (!isfinite(candidate.candidate_a_DF_mag_cgs) ||
+      candidate.candidate_a_DF_mag_cgs <= 0.0)
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+
+  candidate.dt_DF_Myr =
+    (v_rel_cgs / candidate.candidate_a_DF_mag_cgs) / Myr_s;
+  if (isfinite(candidate.dt_DF_Myr) && candidate.dt_DF_Myr > 0.0)
+    candidate.dt_level_over_dt_DF = dt_level_myr / candidate.dt_DF_Myr;
+
+  candidate.requested_delta_v_code =
+    (candidate.candidate_a_DF_mag_cgs / velocity_units) *
+    (dt_level_myr * Myr_s);
+  if (v_rel_code > 0.0)
+    candidate.cap_fraction_requested =
+      candidate.requested_delta_v_code / v_rel_code;
+
+  if (!isfinite(candidate.dt_DF_Myr) ||
+      !isfinite(candidate.dt_level_over_dt_DF) ||
+      !isfinite(candidate.requested_delta_v_code) ||
+      candidate.requested_delta_v_code < 0.0 ||
+      !isfinite(candidate.cap_fraction_requested) ||
+      candidate.cap_fraction_requested < 0.0) {
+    return BHDFDefaultCandidateWithKernel(
+      kernel_radius_phys_kpc, kernel_complete);
+  }
+
+  candidate.computed = 1;
+  return candidate;
+}
+
 static void BHDFEmitActiveDryRunDetail(
   FILE *logptr, int processor, int invocation_seq, int grid_id, int step,
   int level, long long bh_id, int particle_index, double bh_mass_msun,
   const double bh_pos[], const double bh_vel_kms[],
   double kernel_radius_code, double kernel_radius_phys_kpc,
-  double kernel_radius_over_dx, double dt_level_myr)
+  double kernel_radius_over_dx, double dt_level_myr,
+  const BHDFCandidateResult &candidate)
 {
   fprintf(logptr,
           "[BHDF_ACTIVE] schema_version=%d mode=active_dry_run "
@@ -346,17 +595,17 @@ static void BHDFEmitActiveDryRunDetail(
           "bh_pos_x=%.15g bh_pos_y=%.15g bh_pos_z=%.15g "
           "bh_vel_x_kms=%.8g bh_vel_y_kms=%.8g bh_vel_z_kms=%.8g "
           "kernel_radius_code=%.8g kernel_radius_phys_kpc=%.8g "
-          "kernel_radius_over_dx=%.8g kernel_complete=1 "
-          "kernel_truncated_by_grid=0 n_dm_in_kernel=0 n_slow=0 "
-          "rho_slow_cgs=0 v_rel_kms=0 sigma_1d_kms=0 "
-          "b_min_phys_kpc=0 b_max_phys_kpc=%.8g ln_lambda=0 "
-          "candidate_a_DF_x_cgs=0 candidate_a_DF_y_cgs=0 "
-          "candidate_a_DF_z_cgs=0 candidate_a_DF_mag_cgs=0 "
+          "kernel_radius_over_dx=%.8g kernel_complete=%d "
+          "kernel_truncated_by_grid=%d n_dm_in_kernel=%d n_slow=%d "
+          "rho_slow_cgs=%.8e v_rel_kms=%.8g sigma_1d_kms=%.8g "
+          "b_min_phys_kpc=%.8g b_max_phys_kpc=%.8g ln_lambda=%.8g "
+          "candidate_a_DF_x_cgs=%.8e candidate_a_DF_y_cgs=%.8e "
+          "candidate_a_DF_z_cgs=%.8e candidate_a_DF_mag_cgs=%.8e "
           "limited_a_DF_x_cgs=0 limited_a_DF_y_cgs=0 "
           "limited_a_DF_z_cgs=0 limited_a_DF_mag_cgs=0 "
-          "dt_level_Myr=%.8g dt_DF_Myr=0 dt_level_over_dt_DF=0 "
-          "requested_delta_v_code=0 limited_delta_v_code=0 "
-          "applied_delta_v_code=0 cap_fraction_requested=0 "
+          "dt_level_Myr=%.8g dt_DF_Myr=%.8g dt_level_over_dt_DF=%.8g "
+          "requested_delta_v_code=%.8g limited_delta_v_code=0 "
+          "applied_delta_v_code=0 cap_fraction_requested=%.8g "
           "cap_fraction_applied=0 per_substep_cap=%.8g "
           "per_level_cap=%.8g subcycle_count=0 max_subcycles=%d "
           "suppression_reason_code=1 suppression_reason_name=diagnostics_only "
@@ -373,8 +622,19 @@ static void BHDFEmitActiveDryRunDetail(
           bh_pos[0], bh_pos[1], bh_pos[2],
           bh_vel_kms[0], bh_vel_kms[1], bh_vel_kms[2],
           kernel_radius_code, kernel_radius_phys_kpc,
-          kernel_radius_over_dx, kernel_radius_phys_kpc,
-          dt_level_myr,
+          kernel_radius_over_dx, candidate.kernel_complete,
+          candidate.kernel_truncated_by_grid, candidate.n_dm_in_kernel,
+          candidate.n_slow, candidate.rho_slow_cgs, candidate.v_rel_kms,
+          candidate.sigma_1d_kms, candidate.b_min_phys_kpc,
+          candidate.b_max_phys_kpc, candidate.ln_lambda,
+          candidate.candidate_a_DF_cgs[0],
+          candidate.candidate_a_DF_cgs[1],
+          candidate.candidate_a_DF_cgs[2],
+          candidate.candidate_a_DF_mag_cgs,
+          dt_level_myr, candidate.dt_DF_Myr,
+          candidate.dt_level_over_dt_DF,
+          candidate.requested_delta_v_code,
+          candidate.cap_fraction_requested,
           BHDynamicalFrictionActiveMaxKickFraction,
           BHDynamicalFrictionActiveMaxLevelKickFraction,
           BHDynamicalFrictionActiveMaxSubcycles);
@@ -413,7 +673,8 @@ static int BHDFActiveDryRunSkeleton(
   PINT *particle_number, float *particle_mass,
   FLOAT *particle_position[], float *particle_velocity[],
   int number_of_particle_attributes, float *particle_attribute[],
-  double mass_to_msun, double velocity_to_kms,
+  double mass_units, double length_units, double velocity_units,
+  const FLOAT *grid_left_edge, const FLOAT *grid_right_edge,
   double kernel_radius_code, double kernel_radius_phys_kpc,
   double kernel_radius_over_dx, double dt_level_myr)
 {
@@ -436,12 +697,19 @@ static int BHDFActiveDryRunSkeleton(
 
   const int eligible_bh = int(bh_particles.size());
   int detail_rows_emitted = 0;
+  const double mass_to_msun =
+    (isfinite(mass_units) && mass_units > 0.0) ? mass_units / SolarMass : 0.0;
+  const double velocity_to_kms =
+    (isfinite(velocity_units) && velocity_units > 0.0) ?
+    velocity_units / 1.0e5 : 0.0;
 
   if (BHDynamicalFrictionActiveVerbose >= 2) {
     for (int bp = 0; bp < eligible_bh; bp++) {
       const int p = bh_particles[bp];
       double bh_pos[MAX_DIMENSION] = {0.0, 0.0, 0.0};
       double bh_vel_kms[MAX_DIMENSION] = {0.0, 0.0, 0.0};
+      BHDFCandidateResult candidate;
+      BHDFInitCandidateResult(&candidate, kernel_radius_phys_kpc);
 
       for (int dim = 0; dim < MAX_DIMENSION; dim++) {
         if (particle_position[dim] != NULL)
@@ -468,12 +736,38 @@ static int BHDFActiveDryRunSkeleton(
 
       const long long bh_id = (particle_number != NULL) ?
         (long long) particle_number[p] : -1;
+      const int newly_seeded =
+        (particle_number != NULL &&
+         BHDFIsNewlySeededThisPass(particle_number[p])) ? TRUE : FALSE;
+
+      int point_in_grid = TRUE;
+      if (grid_left_edge != NULL && grid_right_edge != NULL) {
+        for (int dim = 0; dim < MAX_DIMENSION; dim++) {
+          if (bh_pos[dim] < double(grid_left_edge[dim]) ||
+              bh_pos[dim] > double(grid_right_edge[dim]))
+            point_in_grid = FALSE;
+        }
+      }
+
+      const int invalid_mass =
+        (!isfinite(bh_mass_code) || bh_mass_code <= 0.0 ||
+         particle_mass == NULL || !isfinite(double(particle_mass[p])) ||
+         double(particle_mass[p]) <= 0.0) ? TRUE : FALSE;
+
+      if (!newly_seeded && point_in_grid && !invalid_mass) {
+        candidate = BHDFComputeCandidate(
+          number_of_particles, particle_type, particle_mass,
+          particle_position, particle_velocity, p, bh_pos, bh_mass_code,
+          kernel_radius_code, kernel_radius_phys_kpc, dt_level_myr,
+          mass_units, length_units, velocity_units,
+          grid_left_edge, grid_right_edge);
+      }
 
       BHDFEmitActiveDryRunDetail(
         logptr, processor, invocation_seq, grid_id, step, level,
         bh_id, p, bh_mass_msun, bh_pos, bh_vel_kms,
         kernel_radius_code, kernel_radius_phys_kpc,
-        kernel_radius_over_dx, dt_level_myr);
+        kernel_radius_over_dx, dt_level_myr, candidate);
       detail_rows_emitted++;
     }
   }
@@ -502,6 +796,9 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
     if (BHDynamicalFrictionActiveVerbose <= 0)
       return SUCCESS;
 
+    if (GridRank != 3)
+      return SUCCESS;
+
     FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
     static int bhdf_active_invocation_seq_counter = 0;
     const int bhdf_active_invocation_seq =
@@ -513,16 +810,13 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
       (GetUnits(&DensityUnits, &LengthUnits, &TemperatureUnits,
                 &TimeUnits, &VelocityUnits, Time) != FAIL);
 
-    double mass_to_msun = 0.0;
-    double velocity_to_kms = 0.0;
+    double mass_units = 0.0;
     double kernel_radius_code = 0.0;
     double kernel_radius_over_dx = 0.0;
     double dt_level_myr = 0.0;
     if (units_valid) {
-      const double mass_units = double(DensityUnits) *
+      mass_units = double(DensityUnits) *
         double(LengthUnits) * double(LengthUnits) * double(LengthUnits);
-      mass_to_msun = mass_units / SolarMass;
-      velocity_to_kms = double(VelocityUnits) / 1.0e5;
       kernel_radius_code =
         BHDFKernelRadiusCode(BHDynamicalFrictionKernelRadius, Time,
                              LengthUnits);
@@ -543,7 +837,8 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
       NumberOfParticles, ParticleType, ParticleNumber, ParticleMass,
       ParticlePosition, ParticleVelocity,
       NumberOfParticleAttributes, ParticleAttribute,
-      mass_to_msun, velocity_to_kms, kernel_radius_code,
+      mass_units, double(LengthUnits), double(VelocityUnits),
+      GridLeftEdge, GridRightEdge, kernel_radius_code,
       kernel_radius_phys_kpc, kernel_radius_over_dx, dt_level_myr);
   }
 
