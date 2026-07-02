@@ -25,6 +25,8 @@ The current implementation:
 
 - uses dark-matter particles as the collisionless background for Method 1;
 - excludes stars and black holes from the Method 1 background estimate;
+- applies the MASSFIX0 endpoint true-mass correction for native dark-matter
+  slow-mass sums before Method 1 and Method 2 density/acceleration magnitudes;
 - emits structured Rev1 `[BHDF]`, `[BHDF_SUMMARY]`, and `[BHDF_WARN]` rows for
   Method 1 when `BHDynamicalFrictionVerbose` permits;
 - emits structured `[BHDF_ACTIVE]` and `[BHDF_ACTIVE_SUMMARY]` dry-run rows for
@@ -224,11 +226,11 @@ dry-run identity fields:
 - `applied_delta_v_code=0`;
 - `active_validation_flags=dry_run_no_physics`.
 
-All candidate acceleration, limited acceleration, kick, application,
-bookkeeping, and momentum-transfer fields are zero or neutral parser-valid
-placeholders. Method 2 does not compute an active force formula, candidate
-acceleration, cap-limited acceleration, subcycle application, or local-gravity
-force ratio.
+Formula-0 candidate estimator fields are computed and logged in dry-run form.
+Limited acceleration, kick, application, bookkeeping, and momentum-transfer
+fields remain zero or neutral parser-valid placeholders. Method 2 still does not
+apply an active force, cap-limited acceleration, subcycle application, or
+local-gravity force ratio.
 
 With `BHDynamicalFrictionActiveVerbose >= 1`, Method 2 emits
 `[BHDF_ACTIVE_SUMMARY]` accounting rows. Required dry-run accounting is:
@@ -240,6 +242,45 @@ With `BHDynamicalFrictionActiveVerbose >= 1`, Method 2 emits
 - `summary_accounting_passed=1`.
 
 No `[BHDF_ACTIVE_WARN]` rows are emitted by default.
+
+## Native Particle-Mass Convention And MASSFIX0
+
+MASSAUDIT0 confirmed that native Enzo dark-matter `ParticleMass` values are
+density-like on AMR grids: the true code mass represented by an accumulated
+native dark-matter mass sum is the stored sum multiplied by the local grid cell
+volume. Black-hole masses are absolute through the BH formation/accreted-mass
+attributes and are not scaled by this correction.
+
+MASSFIX0 implements an endpoint correction in the Method 1 Rev1 and Method 2
+Formula-0 candidate paths:
+
+- per-particle stored dark-matter masses remain the weights for `v_CoM`,
+  `v_rel`, and `sigma_1d`, preserving the velocity chain;
+- after slow dark-matter mass is accumulated, the stored slow-mass sum is
+  multiplied by the local cell-volume product
+  `CellWidth[0][0] * CellWidth[1][0] * CellWidth[2][0]`;
+- post-MASSFIX0 `mass_slow_code` in Method 1 `[BHDF]` rows means true code mass;
+- Method 2 has no `mass_slow_code` output field, but its `rho_slow_cgs` and
+  downstream Formula-0 candidate fields use the corrected true slow mass;
+- parser field names and parser schema are unchanged, and the accepted parser
+  package remains frozen.
+
+The corrected endpoint changes mass/density-dependent magnitudes:
+`mass_slow_code` for Method 1, `rho_slow_cgs`, `a_DF_*_cgs`,
+`a_DF_mag_cgs`, `dt_DF_Myr`, `dt_level_over_dt_DF`,
+`requested_delta_v_code`, and cap fractions. Before MASSFIX0, native AMR
+dark-matter rows overestimated `rho_slow_cgs` and `a_DF` and therefore made
+`dt_DF` too small because `dt_DF = v_rel / |a_DF|`.
+
+CAP-0 is reinterpreted under this correction. The parser-recovered cap-trigger
+count `431,342` is authoritative. Earlier aggregate double-counting and
+overstated cap-warning phrasing are retracted. With the MASSFIX0 mass convention,
+the corrected all-row maximum cap fraction is expected to be around `0.219`,
+pending the dedicated post-fix compile/runtime evidence and one-time rebaseline.
+
+This source/documentation update does not by itself validate MASSFIX0. Compile,
+parser, runtime no-mutation, exact-state, and magnitude evidence must be
+produced in later phases before claiming post-fix validation.
 
 ## Common Checks For Users
 
@@ -296,8 +337,10 @@ evidence:
 
 This evidence validates dry-run log emission, accepted parser compatibility on
 runtime logs, zero active application, and exact state equality in one
-deterministic single-rank collisionless test. It does not validate active force
-physics.
+deterministic single-rank collisionless test. MASSAUDIT0 later found that the
+pre-MASSFIX0 native dark-matter mass convention invalidated physical magnitude
+claims for `rho_slow_cgs`, `a_DF`, `dt_DF`, and cap fractions. It does not
+validate active force physics.
 
 ## Important Limitations
 

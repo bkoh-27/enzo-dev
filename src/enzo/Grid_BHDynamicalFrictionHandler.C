@@ -392,8 +392,8 @@ static BHDFCandidateResult BHDFComputeCandidate(
   int bh_index, const double bh_pos[], double bh_mass_code,
   double kernel_radius_code, double kernel_radius_phys_kpc,
   double dt_level_myr, double mass_units, double length_units,
-  double velocity_units, const FLOAT *grid_left_edge,
-  const FLOAT *grid_right_edge)
+  double velocity_units, double cell_volume_code,
+  const FLOAT *grid_left_edge, const FLOAT *grid_right_edge)
 {
   BHDFCandidateResult candidate;
   BHDFInitCandidateResult(&candidate, kernel_radius_phys_kpc);
@@ -407,7 +407,8 @@ static BHDFCandidateResult BHDFComputeCandidate(
       kernel_radius_phys_kpc <= 0.0 || !isfinite(mass_units) ||
       mass_units <= 0.0 || !isfinite(length_units) ||
       length_units <= 0.0 || !isfinite(velocity_units) ||
-      velocity_units <= 0.0)
+      velocity_units <= 0.0 || !isfinite(cell_volume_code) ||
+      cell_volume_code <= 0.0)
     return candidate;
 
   for (int dim = 0; dim < MAX_DIMENSION; dim++) {
@@ -514,8 +515,14 @@ static BHDFCandidateResult BHDFComputeCandidate(
       kernel_radius_phys_kpc, kernel_complete);
   candidate.sigma_1d_kms = sigma_1d_code * velocity_units / 1.0e5;
 
-  if (kernel_volume_cgs > 0.0)
-    candidate.rho_slow_cgs = mass_slow_code * mass_units / kernel_volume_cgs;
+  // MASSAUDIT0/MASSFIX0: native Enzo DM ParticleMass is density-like.
+  // Convert the stored slow-particle sum to true code mass only at this
+  // endpoint so mass-weighted velocity, v_rel, and sigma paths remain
+  // unchanged. BH masses are absolute and are not scaled here.
+  const double mass_slow_code_true = mass_slow_code * cell_volume_code;
+  if (kernel_volume_cgs > 0.0 && isfinite(mass_slow_code_true))
+    candidate.rho_slow_cgs =
+      mass_slow_code_true * mass_units / kernel_volume_cgs;
 
   const double bh_mass_cgs = bh_mass_code * mass_units;
   const double sigma_1d_cgs = sigma_1d_code * velocity_units;
@@ -674,9 +681,10 @@ static int BHDFActiveDryRunSkeleton(
   FLOAT *particle_position[], float *particle_velocity[],
   int number_of_particle_attributes, float *particle_attribute[],
   double mass_units, double length_units, double velocity_units,
-  const FLOAT *grid_left_edge, const FLOAT *grid_right_edge,
-  double kernel_radius_code, double kernel_radius_phys_kpc,
-  double kernel_radius_over_dx, double dt_level_myr)
+  double cell_volume_code, const FLOAT *grid_left_edge,
+  const FLOAT *grid_right_edge, double kernel_radius_code,
+  double kernel_radius_phys_kpc, double kernel_radius_over_dx,
+  double dt_level_myr)
 {
   if (logptr == NULL)
     logptr = stdout;
@@ -759,7 +767,7 @@ static int BHDFActiveDryRunSkeleton(
           number_of_particles, particle_type, particle_mass,
           particle_position, particle_velocity, p, bh_pos, bh_mass_code,
           kernel_radius_code, kernel_radius_phys_kpc, dt_level_myr,
-          mass_units, length_units, velocity_units,
+          mass_units, length_units, velocity_units, cell_volume_code,
           grid_left_edge, grid_right_edge);
       }
 
@@ -798,6 +806,10 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
 
     if (GridRank != 3)
       return SUCCESS;
+
+    const double cell_volume_code =
+      double(CellWidth[0][0]) * double(CellWidth[1][0]) *
+      double(CellWidth[2][0]);
 
     FILE *logptr = (Outfptr != NULL) ? Outfptr : stdout;
     static int bhdf_active_invocation_seq_counter = 0;
@@ -838,6 +850,7 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
       ParticlePosition, ParticleVelocity,
       NumberOfParticleAttributes, ParticleAttribute,
       mass_units, double(LengthUnits), double(VelocityUnits),
+      cell_volume_code,
       GridLeftEdge, GridRightEdge, kernel_radius_code,
       kernel_radius_phys_kpc, kernel_radius_over_dx, dt_level_myr);
   }
@@ -894,6 +907,11 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
 
   const float cell_width = float(CellWidth[0][0]);
   if (cell_width <= 0.0f)
+    return SUCCESS;
+  const double cell_volume_code =
+    double(CellWidth[0][0]) * double(CellWidth[1][0]) *
+    double(CellWidth[2][0]);
+  if (!isfinite(cell_volume_code) || cell_volume_code <= 0.0)
     return SUCCESS;
 
   const double kernel_radius_code =
@@ -1167,6 +1185,11 @@ int grid::BHDynamicalFrictionHandler(HierarchyEntry* SubgridPointer,
       sigma_1d_code = sqrt(sigma2_num / (3.0 * total_dm_mass));
     row.sigma_1d_kms = sigma_1d_code * double(VelocityUnits) / 1.0e5;
 
+    // MASSAUDIT0/MASSFIX0: native Enzo DM ParticleMass is density-like.
+    // Convert the accumulated stored slow-particle density to true code mass
+    // at the endpoint before density/acceleration/cap calculations. This
+    // preserves the mass-weighted velocity chain; BH masses are absolute.
+    row.mass_slow_code *= cell_volume_code;
     if (kernel_volume_cgs > 0.0)
       row.rho_slow_cgs =
         row.mass_slow_code * mass_units / kernel_volume_cgs;
