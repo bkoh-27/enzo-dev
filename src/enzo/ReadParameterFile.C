@@ -2328,8 +2328,8 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHRepositionDiagnosePotential != 0 && BHRepositionDiagnosePotential != 1)
     ENZO_FAIL("BHRepositionDiagnosePotential must be 0 or 1.");
 
-  if (BHDynamicalFrictionMethod < 0 || BHDynamicalFrictionMethod > 2)
-    ENZO_FAIL("BHDynamicalFrictionMethod must be 0 (off), 1 (diagnostics-only), or 2 (active skeleton dry-run/no-kick).");
+  if (BHDynamicalFrictionMethod < 0 || BHDynamicalFrictionMethod > 3)
+    ENZO_FAIL("BHDynamicalFrictionMethod must be 0 (off), 1 (diagnostics-only), 2 (active skeleton dry-run/no-kick), or 3 (ACTIVE3 shadow-only skeleton).");
   if (BHDynamicalFrictionVerbose < 0 || BHDynamicalFrictionVerbose > 2)
     ENZO_FAIL("BHDynamicalFrictionVerbose must be 0, 1, or 2.");
   if (BHDynamicalFrictionMethod > 0 &&
@@ -2340,9 +2340,13 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHDynamicalFrictionMinSlowParticles < 1)
     ENZO_FAIL("BHDynamicalFrictionMinSlowParticles must be >= 1.");
   if (BHDynamicalFrictionActiveApply != 0)
-    ENZO_FAIL("BHDynamicalFrictionActiveApply must be 0 in ADF-SOURCE-SKELETON-0A.");
-  if (BHDynamicalFrictionActiveSchemaVersion != 2)
-    ENZO_FAIL("BHDynamicalFrictionActiveSchemaVersion must be 2.");
+    ENZO_FAIL("BHDynamicalFrictionActiveApply must be 0; active kicks are not authorized.");
+  if (BHDynamicalFrictionMethod <= 2 &&
+      BHDynamicalFrictionActiveSchemaVersion != 2)
+    ENZO_FAIL("BHDynamicalFrictionActiveSchemaVersion must be 2 for BHDynamicalFrictionMethod <= 2.");
+  if (BHDynamicalFrictionMethod == 3 &&
+      BHDynamicalFrictionActiveSchemaVersion != 3)
+    ENZO_FAIL("BHDynamicalFrictionActiveSchemaVersion must be 3 for BHDynamicalFrictionMethod == 3.");
   if (BHDynamicalFrictionActiveVerbose < 0 ||
       BHDynamicalFrictionActiveVerbose > 2)
     ENZO_FAIL("BHDynamicalFrictionActiveVerbose must be 0, 1, or 2.");
@@ -2379,10 +2383,13 @@ int ReadParameterFile(FILE *fptr, TopGridData &MetaData, float *Initialdt)
   if (BHDynamicalFrictionActiveRequireLocalGravity != 0 &&
       BHDynamicalFrictionActiveRequireLocalGravity != 1)
     ENZO_FAIL("BHDynamicalFrictionActiveRequireLocalGravity must be 0 or 1.");
+  if (BHDynamicalFrictionMethod == 3 &&
+      BHDynamicalFrictionActiveRequireLocalGravity != 0)
+    ENZO_FAIL("BHDynamicalFrictionActiveRequireLocalGravity must be 0 for BHDynamicalFrictionMethod == 3.");
   if (BHDynamicalFrictionActiveMaxADFOverAGrav <= 0.0f)
     ENZO_FAIL("BHDynamicalFrictionActiveMaxADFOverAGrav must be positive.");
   if (BHDynamicalFrictionActiveMomentumPolicy != 0)
-    ENZO_FAIL("BHDynamicalFrictionActiveMomentumPolicy must be 0 (bh_only) in ADF-SOURCE-SKELETON-0A.");
+    ENZO_FAIL("BHDynamicalFrictionActiveMomentumPolicy must be 0 (bh_only); Method 3 SOURCE0 emits momentum_policy=none and applies no momentum.");
   if (BHDynamicalFrictionActiveSuppressNewSeeds != 0 &&
       BHDynamicalFrictionActiveSuppressNewSeeds != 1)
     ENZO_FAIL("BHDynamicalFrictionActiveSuppressNewSeeds must be 0 or 1.");
